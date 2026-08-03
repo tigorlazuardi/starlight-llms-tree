@@ -1,0 +1,27 @@
+{
+  "name": "starlight-llms-tree",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "astro": "^7.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/starlight": "^0.41.6",
+    "astro": "^7.0.2",
+    "typescript": "5.9.3"
+  }
+}
