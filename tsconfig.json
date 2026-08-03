@@ -3,10 +3,6 @@
     "declaration": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "baseUrl": ".",
-    "paths": {
-      "@astrojs/starlight/types": ["src/starlight-plugin.d.ts"]
-    },
     "outDir": "dist",
     "rootDir": "src",
     "skipLibCheck": true,

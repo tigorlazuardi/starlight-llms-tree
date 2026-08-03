@@ -1,6 +1,6 @@
-import { lstat, readFile, writeFile } from 'node:fs/promises';
-import type { StarlightPlugin } from '@astrojs/starlight/types';
+import { readFile } from 'node:fs/promises';
 import type { AstroIntegration } from 'astro';
+import { publishGeneratedArtifacts } from './publish.js';
 
 /** Options for the Starlight LLMs Tree plugin. */
 export interface StarlightLlmsTreeOptions {}
@@ -84,27 +84,16 @@ const integration = (): AstroIntegration => ({
         { url: new URL('llms.txt', dir), content: `# ${title}\n\n- [Overview](./index.md)\n` },
       ];
 
-      for (const { url } of manifest) {
-        try {
-          await lstat(url);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-          throw new Error(`Failed to validate generated output target ${url.pathname}`, { cause: error });
-        }
-        throw new Error(`Refusing to overwrite generated output target ${url.pathname}`);
-      }
-
-      await Promise.all(manifest.map(({ url, content }) => writeFile(url, content, { flag: 'wx' })));
+      await publishGeneratedArtifacts(manifest);
     },
   },
 });
 
 /** Creates Starlight plugin that emits LLMs Tree artifacts after static builds. */
-export const starlightLlmsTree = (
-  _options: StarlightLlmsTreeOptions = {},
-): StarlightPlugin => ({
+export const starlightLlmsTree = (_options: StarlightLlmsTreeOptions = {}) => ({
   name: 'starlight-llms-tree',
   hooks: {
-    'config:setup': ({ addIntegration }) => addIntegration(integration()),
+    'config:setup': ({ addIntegration }: { addIntegration(integration: AstroIntegration): void }) =>
+      addIntegration(integration()),
   },
 });

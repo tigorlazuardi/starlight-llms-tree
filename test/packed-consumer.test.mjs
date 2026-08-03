@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -62,9 +62,10 @@ export default defineConfig({ integrations: [starlight({ title: 'Fixture docs', 
   await put(
     root,
     'type-proof.ts',
-    `import { starlightLlmsTree, type StarlightLlmsTreeOptions } from 'starlight-llms-tree';
+    `import type { StarlightPlugin } from '@astrojs/starlight/types';
+import { starlightLlmsTree, type StarlightLlmsTreeOptions } from 'starlight-llms-tree';
 const options: StarlightLlmsTreeOptions = {};
-const plugin = starlightLlmsTree(options);
+const plugin: StarlightPlugin = starlightLlmsTree(options);
 plugin.name satisfies string;
 `,
   );
@@ -96,6 +97,32 @@ Welcome to the packed consumer. This content must remain readable.
   const installed = path.join(root, 'node_modules/starlight-llms-tree');
   const module = await import(pathToFileURL(path.join(installed, 'dist/index.js')));
   assert.deepEqual(Object.keys(module), ['starlightLlmsTree']);
+
+  const { publishGeneratedArtifacts } = await import(
+    pathToFileURL(path.join(installed, 'dist/publish.js'))
+  );
+  const lateFailureRoot = path.join(root, 'late-failure');
+  await mkdir(lateFailureRoot);
+  const firstTarget = pathToFileURL(path.join(lateFailureRoot, 'index.md'));
+  const secondTarget = pathToFileURL(path.join(lateFailureRoot, 'llms.txt'));
+  let publishes = 0;
+  await assert.rejects(
+    publishGeneratedArtifacts(
+      [
+        { url: firstTarget, content: 'generated index\n' },
+        { url: secondTarget, content: 'generated manifest\n' },
+      ],
+      async (source, target) => {
+        if (++publishes === 2) await writeFile(target, 'late collision must survive\n', { flag: 'wx' });
+        await link(source, target);
+      },
+    ),
+    /Refusing to overwrite generated output target .*llms\.txt/,
+  );
+  await assert.rejects(readFile(firstTarget), { code: 'ENOENT' });
+  assert.equal(await readFile(secondTarget, 'utf8'), 'late collision must survive\n');
+  assert.deepEqual(await readdir(lateFailureRoot), ['llms.txt']);
+
   await exec('npm', ['run', 'typecheck'], { cwd: root, maxBuffer });
 
   const build = await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
