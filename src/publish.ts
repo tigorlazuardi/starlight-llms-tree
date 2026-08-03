@@ -1,4 +1,4 @@
-import { link, unlink, writeFile } from 'node:fs/promises';
+import { link, open, unlink, type FileHandle } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
 interface Artifact {
@@ -10,6 +10,8 @@ interface Artifact {
 export const publishGeneratedArtifacts = async (
   artifacts: Artifact[],
   linkFile: typeof link = link,
+  writeTemporary: (file: FileHandle, content: string) => Promise<void> = (file, content) =>
+    file.writeFile(content),
 ) => {
   const staged: Array<{ target: URL; temporary: URL }> = [];
   const published: URL[] = [];
@@ -18,8 +20,13 @@ export const publishGeneratedArtifacts = async (
     for (const { url: target, content } of artifacts) {
       const temporary = new URL(target);
       temporary.pathname += `.starlight-llms-tree-${randomUUID()}.tmp`;
-      await writeFile(temporary, content, { flag: 'wx' });
+      const file = await open(temporary, 'wx');
       staged.push({ target, temporary });
+      try {
+        await writeTemporary(file, content);
+      } finally {
+        await file.close();
+      }
     }
 
     for (const { target, temporary } of staged) {

@@ -101,6 +101,28 @@ Welcome to the packed consumer. This content must remain readable.
   const { publishGeneratedArtifacts } = await import(
     pathToFileURL(path.join(installed, 'dist/publish.js'))
   );
+  const writeFailureRoot = path.join(root, 'write-failure');
+  await mkdir(writeFailureRoot);
+  await put(writeFailureRoot, 'collision.txt', 'unrelated collision must survive\n');
+  const failedWriteTarget = pathToFileURL(path.join(writeFailureRoot, 'index.md'));
+  await assert.rejects(
+    publishGeneratedArtifacts(
+      [{ url: failedWriteTarget, content: 'generated index\n' }],
+      link,
+      async (file) => {
+        await file.writeFile('partial');
+        throw new Error('injected write failure');
+      },
+    ),
+    /injected write failure/,
+  );
+  await assert.rejects(readFile(failedWriteTarget), { code: 'ENOENT' });
+  assert.equal(
+    await readFile(path.join(writeFailureRoot, 'collision.txt'), 'utf8'),
+    'unrelated collision must survive\n',
+  );
+  assert.deepEqual(await readdir(writeFailureRoot), ['collision.txt']);
+
   const lateFailureRoot = path.join(root, 'late-failure');
   await mkdir(lateFailureRoot);
   const firstTarget = pathToFileURL(path.join(lateFailureRoot, 'index.md'));
