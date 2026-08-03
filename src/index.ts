@@ -1,6 +1,8 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, writeFile } from 'node:fs/promises';
+import type { StarlightPlugin } from '@astrojs/starlight/types';
 import type { AstroIntegration } from 'astro';
 
+/** Options for the Starlight LLMs Tree plugin. */
 export interface StarlightLlmsTreeOptions {}
 
 const decodeEntities = (value: string) =>
@@ -64,12 +66,10 @@ const htmlToMarkdown = (html: string) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-export const starlightLlmsTree = (
-  _options: StarlightLlmsTreeOptions = {},
-): AstroIntegration => ({
+const integration = (): AstroIntegration => ({
   name: 'starlight-llms-tree',
   hooks: {
-    'astro:build:done': async ({ dir, pages, logger }) => {
+    'astro:build:done': async ({ dir, pages }) => {
       if (!pages.some(({ pathname }) => pathname === '' || pathname === '/')) {
         throw new Error('starlight-llms-tree requires a root Starlight page');
       }
@@ -79,12 +79,32 @@ export const starlightLlmsTree = (
       if (!titleMatch) throw new Error('Root Starlight page has no h1 title');
 
       const title = text(titleMatch[1]);
-      const page = `# ${title}\n\n${htmlToMarkdown(markdownContent(html))}\n`;
-      await Promise.all([
-        writeFile(new URL('index.md', dir), page),
-        writeFile(new URL('llms.txt', dir), `# ${title}\n\n- [Overview](./index.md)\n`),
-      ]);
-      logger.info('generated_artifacts count=2 paths=llms.txt,index.md');
+      const manifest = [
+        { url: new URL('index.md', dir), content: `# ${title}\n\n${htmlToMarkdown(markdownContent(html))}\n` },
+        { url: new URL('llms.txt', dir), content: `# ${title}\n\n- [Overview](./index.md)\n` },
+      ];
+
+      for (const { url } of manifest) {
+        try {
+          await lstat(url);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw new Error(`Failed to validate generated output target ${url.pathname}`, { cause: error });
+        }
+        throw new Error(`Refusing to overwrite generated output target ${url.pathname}`);
+      }
+
+      await Promise.all(manifest.map(({ url, content }) => writeFile(url, content, { flag: 'wx' })));
     },
+  },
+});
+
+/** Creates Starlight plugin that emits LLMs Tree artifacts after static builds. */
+export const starlightLlmsTree = (
+  _options: StarlightLlmsTreeOptions = {},
+): StarlightPlugin => ({
+  name: 'starlight-llms-tree',
+  hooks: {
+    'config:setup': ({ addIntegration }) => addIntegration(integration()),
   },
 });

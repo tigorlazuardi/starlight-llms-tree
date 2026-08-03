@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
+const maxBuffer = 10 * 1024 * 1024;
 
 const put = async (root, name, content) => {
   const target = path.join(root, name);
@@ -15,11 +16,18 @@ const put = async (root, name, content) => {
   await writeFile(target, content);
 };
 
-test('packed plugin builds a fresh Starlight consumer and writes public artifacts', async (t) => {
+const failedBuild = async (root, message) => {
+  await assert.rejects(exec('npm', ['run', 'build'], { cwd: root, maxBuffer }), (error) => {
+    assert.match(`${error.stdout}\n${error.stderr}`, message);
+    return true;
+  });
+};
+
+test('packed plugin typechecks and builds a real Starlight consumer safely', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'starlight-llms-tree-'));
   t.after(() => rm(root, { force: true, recursive: true }));
   const packed = JSON.parse(
-    (await exec('npm', ['pack', '--json', '--pack-destination', root])).stdout,
+    (await exec('npm', ['pack', '--json', '--pack-destination', root], { maxBuffer })).stdout,
   )[0].filename;
 
   await put(
@@ -28,11 +36,12 @@ test('packed plugin builds a fresh Starlight consumer and writes public artifact
     JSON.stringify({
       private: true,
       type: 'module',
-      scripts: { build: 'astro build' },
+      scripts: { build: 'astro build', typecheck: 'astro sync && tsc --noEmit' },
       dependencies: {
         '@astrojs/starlight': '0.41.6',
         astro: '7.1.6',
         'starlight-llms-tree': `file:${path.join(root, packed)}`,
+        typescript: '5.9.3',
       },
     }),
   );
@@ -42,7 +51,21 @@ test('packed plugin builds a fresh Starlight consumer and writes public artifact
     `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { starlightLlmsTree } from 'starlight-llms-tree';
-export default defineConfig({ integrations: [starlight({ title: 'Fixture docs' }), starlightLlmsTree()] });
+export default defineConfig({ integrations: [starlight({ title: 'Fixture docs', plugins: [starlightLlmsTree()] })] });
+`,
+  );
+  await put(
+    root,
+    'tsconfig.json',
+    JSON.stringify({ extends: 'astro/tsconfigs/strict' }),
+  );
+  await put(
+    root,
+    'type-proof.ts',
+    `import { starlightLlmsTree, type StarlightLlmsTreeOptions } from 'starlight-llms-tree';
+const options: StarlightLlmsTreeOptions = {};
+const plugin = starlightLlmsTree(options);
+plugin.name satisfies string;
 `,
   );
   await put(
@@ -67,18 +90,16 @@ Welcome to the packed consumer. This content must remain readable.
 
   await exec('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
     cwd: root,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer,
   });
 
   const installed = path.join(root, 'node_modules/starlight-llms-tree');
-  const declarations = await readFile(path.join(installed, 'dist/index.d.ts'), 'utf8');
-  assert.match(declarations, /export interface StarlightLlmsTreeOptions/);
-  assert.match(declarations, /export declare const starlightLlmsTree/);
   const module = await import(pathToFileURL(path.join(installed, 'dist/index.js')));
-  assert.equal(typeof module.starlightLlmsTree, 'function');
+  assert.deepEqual(Object.keys(module), ['starlightLlmsTree']);
+  await exec('npm', ['run', 'typecheck'], { cwd: root, maxBuffer });
 
-  const build = await exec('npm', ['run', 'build'], { cwd: root, maxBuffer: 10 * 1024 * 1024 });
-  assert.match(build.stdout, /generated_artifacts count=2/);
+  const build = await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
+  assert.doesNotMatch(`${build.stdout}\n${build.stderr}`, /generated_artifacts/);
 
   const llms = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const markdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
@@ -86,15 +107,24 @@ Welcome to the packed consumer. This content must remain readable.
   assert.match(markdown, /^# Overview/m);
   assert.match(markdown, /Welcome to the packed consumer\. This content must remain readable\./);
 
+  await put(root, 'public/index.md', 'existing file must survive\n');
+  await failedBuild(root, /Refusing to overwrite generated output target .*index\.md/);
+  await assert.rejects(readFile(path.join(root, 'dist/llms.txt')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(root, 'dist/index.md'), 'utf8'), 'existing file must survive\n');
+
+  await rm(path.join(root, 'public/index.md'));
+  await put(root, 'public/llms.txt/marker', 'existing directory must survive\n');
+  await failedBuild(root, /Refusing to overwrite generated output target .*llms\.txt/);
+  await assert.rejects(readFile(path.join(root, 'dist/index.md')), { code: 'ENOENT' });
+  assert.equal(
+    await readFile(path.join(root, 'dist/llms.txt/marker'), 'utf8'),
+    'existing directory must survive\n',
+  );
+
+  await rm(path.join(root, 'public/llms.txt'), { recursive: true });
   await rename(
     path.join(root, 'src/content/docs/index.md'),
     path.join(root, 'src/content/docs/guide.md'),
   );
-  await assert.rejects(
-    exec('npm', ['run', 'build'], { cwd: root, maxBuffer: 10 * 1024 * 1024 }),
-    (error) => {
-      assert.match(`${error.stdout}\n${error.stderr}`, /requires a root Starlight page/);
-      return true;
-    },
-  );
+  await failedBuild(root, /requires a root Starlight page/);
 });
