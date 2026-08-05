@@ -80,14 +80,60 @@ export const collections = { docs: defineCollection({ loader: docsLoader(), sche
   );
   await put(
     root,
-    'src/content/docs/index.md',
+    'src/content/docs/index.mdx',
     `---
 title: Overview
+description: Rich fixture page
 ---
 
+import { Aside, FileTree, TabItem, Tabs } from '@astrojs/starlight/components';
+
 Welcome to the packed consumer. This content must remain readable.
+
+## Install
+
+- First item
+- Second item
+
+<Aside type="tip" title="Remember">Keep **semantic content**.</Aside>
+
+<Tabs>
+  <TabItem label="npm">\`npm install package\`</TabItem>
+  <TabItem label="pnpm">\`pnpm add package\`</TabItem>
+</Tabs>
+
+<details>
+  <summary>More information</summary>
+
+  Details stay readable.
+</details>
+
+\`\`\`js title="example.js"
+console.log('rich code');
+\`\`\`
+
+<FileTree>
+- src/
+  - index.ts
+- package.json
+</FileTree>
+
+<section class="feature">Useful [guide link](/guide/#start) with <kbd>Ctrl</kbd>, [fragment](#install), [external](https://example.com/docs), and [asset](/logo.svg).</section>
+
+{/* converter must remove this comment */}
 `,
   );
+  await put(
+    root,
+    'src/content/docs/guide.md',
+    `---
+title: Guide
+---
+
+# Start
+`,
+  );
+  await put(root, 'public/logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>\n');
 
   await exec('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
     cwd: root,
@@ -153,8 +199,25 @@ Welcome to the packed consumer. This content must remain readable.
   const llms = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const markdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
   assert.match(llms, /\[Overview\]\(\.\/index\.md\)/);
-  assert.match(markdown, /^# Overview/m);
+  assert.match(
+    markdown,
+    /^---\n\{\n  "title": "Overview",\n  "description": "Rich fixture page"\n\}\n---\n\n# Overview/,
+  );
   assert.match(markdown, /Welcome to the packed consumer\. This content must remain readable\./);
+  assert.match(markdown, /## Install/);
+  assert.match(markdown, /- First item\n- Second item/);
+  assert.match(markdown, /> \[!TIP\]\n> Keep \*\*semantic content\*\*\./);
+  assert.match(markdown, /### npm\n\n`npm install package`/);
+  assert.match(markdown, /### pnpm\n\n`pnpm add package`/);
+  assert.match(markdown, /<details>[\s\S]*<summary>More information<\/summary>[\s\S]*Details stay readable\.[\s\S]*<\/details>/);
+  assert.match(markdown, /```js\nconsole\.log\('rich code'\);\n```/);
+  assert.match(markdown, /<summary>src\/<\/summary>[\s\S]*- index\.ts[\s\S]*- package\.json/);
+  assert.match(markdown, /\[guide link\]\(\/guide\.md#start\)/);
+  assert.match(markdown, /<kbd>Ctrl<\/kbd>/);
+  assert.match(markdown, /\[fragment\]\(#install\)/);
+  assert.match(markdown, /\[external\]\(https:\/\/example\.com\/docs\)/);
+  assert.match(markdown, /\[asset\]\(\/logo\.svg\)/);
+  assert.doesNotMatch(markdown, /converter must remove this comment|tablist-wrapper|starlight-aside__title/);
 
   await put(root, 'public/index.md', 'existing file must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*index\.md/);
@@ -172,8 +235,8 @@ Welcome to the packed consumer. This content must remain readable.
 
   await rm(path.join(root, 'public/llms.txt'), { recursive: true });
   await rename(
-    path.join(root, 'src/content/docs/index.md'),
-    path.join(root, 'src/content/docs/guide.md'),
+    path.join(root, 'src/content/docs/index.mdx'),
+    path.join(root, 'src/content/docs/renamed-root.mdx'),
   );
   await failedBuild(root, /requires a root Starlight page/);
 });
