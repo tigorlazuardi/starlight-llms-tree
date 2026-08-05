@@ -51,7 +51,7 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
     `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { starlightLlmsTree } from 'starlight-llms-tree';
-export default defineConfig({ integrations: [starlight({ title: 'Fixture docs', plugins: [starlightLlmsTree()] })] });
+export default defineConfig({ base: '/docs', integrations: [starlight({ title: 'Fixture docs', plugins: [starlightLlmsTree()] })] });
 `,
   );
   await put(
@@ -72,22 +72,111 @@ plugin.name satisfies string;
   await put(
     root,
     'src/content.config.ts',
-    `import { defineCollection } from 'astro:content';
+    `import { defineCollection, z } from 'astro:content';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
-export const collections = { docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }) };
+export const collections = { docs: defineCollection({ loader: docsLoader({ generateId: ({ entry }) => entry === 'nfd.md' ? 'unicode/e\\u0301' : entry.replace(/\\.mdx?$/, '') }), schema: docsSchema({ extend: z.object({ tags: z.array(z.string()).optional() }) }) }) };
 `,
   );
-  await put(
-    root,
-    'src/content/docs/index.md',
-    `---
+  const fixturePages = {
+    'index.md': `---
 title: Overview
+description: Fixture docs home.
+tags: [product, product/core]
 ---
 
 Welcome to the packed consumer. This content must remain readable.
 `,
-  );
+    'changelog.md': `---
+title: Changelog
+description: Product changes.
+tags: [releases/history]
+---
+
+Release notes.
+`,
+    'empty.md': `---
+title: Empty
+tags: [empty]
+---
+`,
+    'nfd.md': `---
+title: NFD route
+tags: [unicode/survive]
+---
+
+NFD page.
+`,
+    'zulu.md': `---
+title: Zulu
+tags: [plain]
+---
+
+Zulu page.
+`,
+    'eclair.md': `---
+title: Éclair
+tags: [accent/topic]
+---
+
+Éclair page.
+`,
+    'guides/index.md': `---
+title: Guides
+description: Build fixture apps.
+tags: [guide, setup/basics]
+---
+
+Guide overview.
+`,
+    'guides/install.md': `---
+title: Install
+description: Install fixture apps.
+tags: [setup/linux, setup/mac]
+---
+
+Install steps.
+`,
+    'reference/api/endpoints.md': `---
+title: Endpoints
+description: HTTP endpoint reference.
+tags: [api/http]
+---
+
+Endpoint details.
+`,
+    'zulu-folder/index.md': `---
+title: Zulu folder
+tags: [zulu]
+---
+
+Zulu folder overview.
+`,
+    'zulu-folder/child.md': `---
+title: Child Zulu
+tags: [zulu/child]
+---
+
+Zulu child.
+`,
+    'eclair-folder/index.md': `---
+title: Éclair folder
+tags: [éclair]
+---
+
+Éclair folder overview.
+`,
+    'eclair-folder/child.md': `---
+title: Child Éclair
+tags: [éclair/child]
+---
+
+Éclair child.
+`,
+  };
+  for (const [name, content] of Object.entries(fixturePages)) {
+    await put(root, `src/content/docs/${name}`, content);
+  }
 
   await exec('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
     cwd: root,
@@ -152,7 +241,93 @@ Welcome to the packed consumer. This content must remain readable.
 
   const llms = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const markdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
-  assert.match(llms, /\[Overview\]\(\.\/index\.md\)/);
+  assert.equal(
+    llms,
+    `# Overview
+
+> Fixture docs home.
+
+## Pages
+
+- [Overview](/index.md): Fixture docs home.
+  - Tags: \`product\`, \`product/core\`
+- [Changelog](/changelog.md): Product changes.
+  - Tags: \`releases/history\`
+- [Empty](/empty.md)
+  - Tags: \`empty\`
+- [Zulu](/zulu.md)
+  - Tags: \`plain\`
+- [Éclair](/eclair.md)
+  - Tags: \`accent/topic\`
+
+## Folders
+
+- [Guides](/guides/llms.txt): Build fixture apps.
+  - Scopes: \`guide\`, \`setup\`
+- [Reference](/reference/llms.txt)
+  - Scopes: \`api\`
+- [Unicode](/unicode/llms.txt)
+  - Scopes: \`unicode\`
+- [Zulu folder](/zulu-folder/llms.txt)
+  - Scopes: \`zulu\`
+- [Éclair folder](/eclair-folder/llms.txt)
+  - Scopes: \`éclair\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/guides/llms.txt'), 'utf8'),
+    `# Guides
+
+> Build fixture apps.
+
+## Pages
+
+- [Overview](/guides.md): Build fixture apps.
+  - Tags: \`guide\`, \`setup/basics\`
+- [Install](/guides/install.md): Install fixture apps.
+  - Tags: \`setup/linux\`, \`setup/mac\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/reference/llms.txt'), 'utf8'),
+    `# Reference
+
+## Folders
+
+- [Api](/reference/api/llms.txt)
+  - Scopes: \`api\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/reference/api/llms.txt'), 'utf8'),
+    `# Api
+
+## Pages
+
+- [Endpoints](/reference/api/endpoints.md): HTTP endpoint reference.
+  - Tags: \`api/http\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/unicode/llms.txt'), 'utf8'),
+    `# Unicode
+
+## Pages
+
+- [NFD route](/unicode/é.md)
+  - Tags: \`unicode/survive\`
+`,
+  );
+  assert.deepEqual(
+    ['Zulu', 'Éclair'].toSorted((left, right) => left.localeCompare(right, 'en')),
+    ['Éclair', 'Zulu'],
+  );
+  assert.ok(llms.indexOf('[Zulu]') < llms.indexOf('[Éclair]'));
+  assert.deepEqual(
+    ['Zulu folder', 'Éclair folder'].toSorted((left, right) => left.localeCompare(right, 'en')),
+    ['Éclair folder', 'Zulu folder'],
+  );
+  assert.ok(llms.indexOf('[Zulu folder]') < llms.indexOf('[Éclair folder]'));
   assert.match(markdown, /^# Overview/m);
   assert.match(markdown, /Welcome to the packed consumer\. This content must remain readable\./);
 
