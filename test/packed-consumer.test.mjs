@@ -537,7 +537,7 @@ Guide français.
   assert.ok(fileFormatLinks.length > 0);
   assert.ok(fileFormatLinks.every((link) => link.includes(': https://deploy.example/docs/')));
   assert.ok(fileFormatLinks.some((link) => link.endsWith('https://deploy.example/docs/index.md')));
-  assert.ok(fileFormatLinks.some((link) => link.endsWith('https://deploy.example/docs/fr/llms.txt')));
+  assert.ok(fileFormatLinks.some((link) => link.endsWith('https://deploy.example/docs/fr/guide.md')));
   assert.deepEqual(
     (await readdir(path.join(root, 'dist/fr'), { recursive: true }))
       .filter((name) => name.endsWith('.md') || name.endsWith('llms.txt'))
@@ -546,7 +546,9 @@ Guide français.
   );
   await assert.rejects(access(path.join(root, 'dist/fr.md')), { code: 'ENOENT' });
   await assert.rejects(access(path.join(root, 'dist/docs')), { code: 'ENOENT' });
+  const rootIndex = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const frenchIndex = await readFile(path.join(root, 'dist/fr/llms.txt'), 'utf8');
+  assert.doesNotMatch(rootIndex, /Guide français|https:\/\/deploy\.example\/docs\/fr\/(?:guide\.md|llms\.txt)/);
   assert.match(frenchIndex, /\[Guide français\]\(https:\/\/deploy\.example\/docs\/fr\/guide\.md\)/);
   assert.doesNotMatch(frenchIndex, /Changelog|Guide\]\(|Zulu/);
 

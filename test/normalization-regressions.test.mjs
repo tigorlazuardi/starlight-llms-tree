@@ -47,8 +47,9 @@ test('concurrent build ownership fails closed without leaking pathname metadata'
     );
     assert.throws(acquireMetadataOwner, /does not support concurrent builds/);
     assert.throws(() => readMetadata({}), /owner does not match active build/);
-    assert.equal(readMetadata(firstOwner).get('/docs/').title, 'First build');
-    assert.deepEqual(readMetadata(firstOwner).get('/docs/unicode/é/').tags, ['unicode']);
+    assert.equal(readMetadata(firstOwner).get('/docs/').frontmatter.title, 'First build');
+    assert.deepEqual(readMetadata(firstOwner).get('/docs/unicode/é/').frontmatter.tags, ['unicode']);
+    assert.equal(readMetadata(firstOwner).get('/docs/').locale, undefined);
     assert.equal(readMetadata(firstOwner).has('/docs/fr/guide/'), false);
   } finally {
     releaseMetadataOwner(firstOwner);
@@ -63,7 +64,7 @@ test('concurrent build ownership fails closed without leaking pathname metadata'
       },
       async () => new Response(),
     );
-    assert.equal(readMetadata(secondOwner).get('/docs/').title, 'Second build');
+    assert.equal(readMetadata(secondOwner).get('/docs/').frontmatter.title, 'Second build');
   } finally {
     releaseMetadataOwner(secondOwner);
   }

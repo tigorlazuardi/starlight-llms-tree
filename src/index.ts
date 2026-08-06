@@ -14,6 +14,7 @@ export interface StarlightLlmsTreeOptions {}
 
 interface IndexPage {
   route: string;
+  locale?: string;
   title: string;
   description?: string;
   tags: string[];
@@ -152,13 +153,14 @@ const integration = (
           .flatMap(({ pathname }) => {
             const finalPathname = publicPath(pathname, base);
             const route = routeFromPathname(finalPathname, base);
-            const frontmatter = collectionMetadata.get(renderedPathname(route, base, format));
-            return frontmatter
+            const metadata = collectionMetadata.get(renderedPathname(route, base, format));
+            return metadata
               ? [
                   {
                     route,
                     finalPathname,
-                    frontmatter,
+                    frontmatter: metadata.frontmatter,
+                    locale: metadata.locale,
                     outputUrl: markdownUrl(dir, route),
                     outputPathname: markdownPublicPath(route, base, site),
                   },
@@ -208,6 +210,7 @@ const integration = (
             }
             return {
               route: page.route,
+              locale: page.locale,
               title: page.frontmatter.title as string,
               description:
                 typeof page.frontmatter.description === 'string' && page.frontmatter.description.trim()
@@ -217,26 +220,34 @@ const integration = (
               outputPathname: page.outputPathname,
             };
           });
-        const folders = [
-          ...new Set([
-            '',
-            ...indexPages.flatMap(({ route }) => {
-              const segments = route.split('/');
-              return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'));
-            }),
-          ]),
-        ].sort(compare);
-        const folderSet = new Set(folders);
+        const pagesByLocale = new Map<string | undefined, IndexPage[]>();
         for (const page of indexPages) {
-          if (indexPages.some(({ route }) => route.startsWith(`${page.route}/`))) {
-            folderSet.add(page.route);
-          }
+          pagesByLocale.set(page.locale, [...(pagesByLocale.get(page.locale) ?? []), page]);
         }
-        const allFolders = [...folderSet].sort(compare);
-        const indexArtifacts = allFolders.map((folder) => ({
-          url: new URL(indexPath(folder), dir),
-          content: renderIndex(folder, indexPages, allFolders, base, site),
-        }));
+        const indexArtifacts = [...pagesByLocale.entries()].flatMap(([locale, localePages]) => {
+          const folders = [
+            ...new Set([
+              locale ?? '',
+              ...localePages.flatMap(({ route }) => {
+                const segments = route.split('/');
+                return segments
+                  .slice(0, -1)
+                  .map((_, index) => segments.slice(0, index + 1).join('/'));
+              }),
+            ]),
+          ].sort(compare);
+          const folderSet = new Set(folders);
+          for (const page of localePages) {
+            if (localePages.some(({ route }) => route.startsWith(`${page.route}/`))) {
+              folderSet.add(page.route);
+            }
+          }
+          const allFolders = [...folderSet].sort(compare);
+          return allFolders.map((folder) => ({
+            url: new URL(indexPath(folder), dir),
+            content: renderIndex(folder, localePages, allFolders, base, site),
+          }));
+        });
         for (const artifact of indexArtifacts) {
           if (outputTargets.has(artifact.url.href)) {
             throw new Error(`Duplicate generated output target ${artifact.url.pathname}`);
