@@ -29,9 +29,17 @@ test('concurrent build ownership fails closed without leaking pathname metadata'
       },
       async () => new Response(),
     );
+    await onRequest(
+      {
+        locals: { starlightRoute: { entry: { data: { title: 'Unicode page', tags: ['unicode'] } } } },
+        url: new URL('https://example.test/docs/unicode/e%CC%81/'),
+      },
+      async () => new Response(),
+    );
     assert.throws(acquireMetadataOwner, /does not support concurrent builds/);
     assert.throws(() => readMetadata({}), /owner does not match active build/);
     assert.equal(readMetadata(firstOwner).get('/docs/').title, 'First build');
+    assert.deepEqual(readMetadata(firstOwner).get('/docs/unicode/é/').tags, ['unicode']);
   } finally {
     releaseMetadataOwner(firstOwner);
   }

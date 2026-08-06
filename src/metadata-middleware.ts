@@ -44,7 +44,7 @@ export const onRequest: MiddlewareHandler = (context, next) => {
     .starlightRoute;
   const current = state();
   if (route?.entry?.data && current) {
-    current.records.set(routePath(context.url.pathname), route.entry.data);
+    current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), route.entry.data);
   }
   return next();
 };

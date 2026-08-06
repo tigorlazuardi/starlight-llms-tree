@@ -76,7 +76,7 @@ plugin.name satisfies string;
 import { z } from 'astro/zod';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
-export const collections = { docs: defineCollection({ loader: docsLoader(), schema: docsSchema({ extend: z.object({ category: z.enum(['guide', 'reference']) }) }) }) };
+export const collections = { docs: defineCollection({ loader: docsLoader({ generateId: ({ entry }) => entry === 'nfd.md' ? 'unicode/e\\u0301' : entry.replace(/\\.mdx?$/, '') }), schema: docsSchema({ extend: z.object({ category: z.enum(['guide', 'reference']).optional(), tags: z.array(z.string()).optional() }) }) }) };
 `,
   );
   await put(
@@ -86,6 +86,7 @@ export const collections = { docs: defineCollection({ loader: docsLoader(), sche
 title: Overview
 description: Rich fixture page
 category: guide
+tags: [product, product/core]
 pagefind: false
 sidebar:
   order: 2
@@ -147,11 +148,99 @@ console.log('rich code');
     `---
 title: Guide
 category: reference
+description: Direct guide.
+tags: [guide]
 ---
 
 # Start
 `,
   );
+  const extraPages = {
+    'changelog.md': `---
+title: Changelog
+description: Product changes.
+tags: [releases/history]
+---
+
+Release notes.
+`,
+    'nfd.md': `---
+title: NFD route
+tags: [unicode/survive]
+---
+
+NFD page.
+`,
+    'zulu.md': `---
+title: Zulu
+tags: [plain]
+---
+
+Zulu page.
+`,
+    'eclair.md': `---
+title: Éclair
+tags: [accent/topic]
+---
+
+Éclair page.
+`,
+    'guides/index.md': `---
+title: Guides
+description: Build fixture apps.
+tags: [guide, setup/basics]
+---
+
+Guide overview.
+`,
+    'guides/install.md': `---
+title: Install
+description: Install fixture apps.
+tags: [setup/linux, setup/mac]
+---
+
+Install steps.
+`,
+    'reference/api/endpoints.md': `---
+title: Endpoints
+description: HTTP endpoint reference.
+tags: [api/http]
+---
+
+Endpoint details.
+`,
+    'zulu-folder/index.md': `---
+title: Zulu folder
+tags: [zulu]
+---
+
+Zulu folder overview.
+`,
+    'zulu-folder/child.md': `---
+title: Child Zulu
+tags: [zulu/child]
+---
+
+Zulu child.
+`,
+    'eclair-folder/index.md': `---
+title: Éclair folder
+tags: [éclair]
+---
+
+Éclair folder overview.
+`,
+    'eclair-folder/child.md': `---
+title: Child Éclair
+tags: [éclair/child]
+---
+
+Éclair child.
+`,
+  };
+  for (const [name, content] of Object.entries(extraPages)) {
+    await put(root, `src/content/docs/${name}`, content);
+  }
   await put(root, 'src/pages/download.astro', '<h1>Download endpoint</h1>\n');
   await put(root, 'public/feed/index.html', '<p>Feed endpoint</p>\n');
   await put(root, 'public/report.html', '<p>Raw report</p>\n');
@@ -221,8 +310,93 @@ category: reference
   const llms = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const markdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
   const guideMarkdown = await readFile(path.join(root, 'dist/guide.md'), 'utf8');
-  assert.match(llms, /\[Overview\]\(\.\/index\.md\)/);
-  assert.match(llms, /\[Guide\]\(\.\/guide\.md\)/);
+  assert.equal(
+    llms,
+    `# Overview
+
+> Rich fixture page
+
+## Pages
+
+- [Overview](/docs/index.md): Rich fixture page
+  - Tags: \`product\`, \`product/core\`
+- [Changelog](/docs/changelog.md): Product changes.
+  - Tags: \`releases/history\`
+- [Guide](/docs/guide.md): Direct guide.
+  - Tags: \`guide\`
+- [Zulu](/docs/zulu.md)
+  - Tags: \`plain\`
+- [Éclair](/docs/eclair.md)
+  - Tags: \`accent/topic\`
+
+## Folders
+
+- [Guides](/docs/guides/llms.txt): Build fixture apps.
+  - Scopes: \`guide\`, \`setup\`
+- [Reference](/docs/reference/llms.txt)
+  - Scopes: \`api\`
+- [Unicode](/docs/unicode/llms.txt)
+  - Scopes: \`unicode\`
+- [Zulu folder](/docs/zulu-folder/llms.txt)
+  - Scopes: \`zulu\`
+- [Éclair folder](/docs/eclair-folder/llms.txt)
+  - Scopes: \`éclair\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/guides/llms.txt'), 'utf8'),
+    `# Guides
+
+> Build fixture apps.
+
+## Pages
+
+- [Overview](/docs/guides.md): Build fixture apps.
+  - Tags: \`guide\`, \`setup/basics\`
+- [Install](/docs/guides/install.md): Install fixture apps.
+  - Tags: \`setup/linux\`, \`setup/mac\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/reference/llms.txt'), 'utf8'),
+    `# Reference
+
+## Folders
+
+- [Api](/docs/reference/api/llms.txt)
+  - Scopes: \`api\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/reference/api/llms.txt'), 'utf8'),
+    `# Api
+
+## Pages
+
+- [Endpoints](/docs/reference/api/endpoints.md): HTTP endpoint reference.
+  - Tags: \`api/http\`
+`,
+  );
+  assert.equal(
+    await readFile(path.join(root, 'dist/unicode/llms.txt'), 'utf8'),
+    `# Unicode
+
+## Pages
+
+- [NFD route](/docs/unicode/é.md)
+  - Tags: \`unicode/survive\`
+`,
+  );
+  assert.deepEqual(
+    ['Zulu', 'Éclair'].toSorted((left, right) => left.localeCompare(right, 'en')),
+    ['Éclair', 'Zulu'],
+  );
+  assert.ok(llms.indexOf('[Zulu]') < llms.indexOf('[Éclair]'));
+  assert.deepEqual(
+    ['Zulu folder', 'Éclair folder'].toSorted((left, right) => left.localeCompare(right, 'en')),
+    ['Éclair folder', 'Zulu folder'],
+  );
+  assert.ok(llms.indexOf('[Zulu folder]') < llms.indexOf('[Éclair folder]'));
   assert.match(guideMarkdown, /^---[\s\S]*"title": "Guide"[\s\S]*---\n\n# Guide/);
   const frontmatterMatch = markdown.match(/^---\n([\s\S]*?)\n---\n\n# Overview/);
   assert.ok(frontmatterMatch);
@@ -266,11 +440,41 @@ category: reference
     .map((name) => path.join(root, 'dist', name));
   assert.deepEqual(
     generatedMarkdown.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
-    ['404.md', 'guide.md', 'index.md'],
+    [
+      '404.md',
+      'changelog.md',
+      'eclair-folder.md',
+      'eclair-folder/child.md',
+      'eclair.md',
+      'guide.md',
+      'guides.md',
+      'guides/install.md',
+      'index.md',
+      'reference/api/endpoints.md',
+      'unicode/é.md',
+      'zulu-folder.md',
+      'zulu-folder/child.md',
+      'zulu.md',
+    ],
   );
-  for (const source of [path.join(root, 'dist/llms.txt'), ...generatedMarkdown]) {
+  const generatedIndexes = (await readdir(path.join(root, 'dist'), { recursive: true }))
+    .filter((name) => name.endsWith('llms.txt'))
+    .map((name) => path.join(root, 'dist', name));
+  assert.deepEqual(
+    generatedIndexes.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
+    [
+      'eclair-folder/llms.txt',
+      'guides/llms.txt',
+      'llms.txt',
+      'reference/api/llms.txt',
+      'reference/llms.txt',
+      'unicode/llms.txt',
+      'zulu-folder/llms.txt',
+    ],
+  );
+  for (const source of [...generatedIndexes, ...generatedMarkdown]) {
     const content = await readFile(source, 'utf8');
-    for (const match of content.matchAll(/\]\(([^)]+\.md)(?:[?#][^)]*)?\)/g)) {
+    for (const match of content.matchAll(/\]\(([^)?#]+(?:\.md|llms\.txt))(?:[?#][^)]*)?\)/g)) {
       const target = match[1].startsWith('/docs/')
         ? path.join(root, 'dist', match[1].slice('/docs/'.length))
         : path.resolve(path.dirname(source), match[1]);
