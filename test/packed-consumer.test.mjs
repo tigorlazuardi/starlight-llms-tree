@@ -10,6 +10,43 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 const maxBuffer = 10 * 1024 * 1024;
 
+const config = ({ format = 'directory', locales = false, navigation = false, site, trailingSlash = 'ignore' } = {}) => `import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+import { starlightLlmsTree } from 'starlight-llms-tree';
+export default defineConfig({
+  base: '/docs',
+  build: { format: '${format}' },
+  ${site ? `site: '${site}',` : ''}
+  trailingSlash: '${trailingSlash}',
+  ${navigation ? "redirects: { '/legacy': '/docs/guide/' }," : ''}
+  integrations: [starlight({
+    title: 'Fixture docs',
+    ${locales ? "locales: { root: { label: 'English', lang: 'en' }, fr: { label: 'Français', lang: 'fr' } }," : ''}
+    ${navigation ? "sidebar: [{ slug: 'guide' }, { slug: 'eclair' }, { label: 'Guides', items: [{ slug: 'guides/install' }, { slug: 'guide' }] }, { label: 'Reference', items: [{ slug: 'reference/api/endpoints' }] }]," : ''}
+    plugins: [starlightLlmsTree()],
+  })],
+});
+`;
+
+const artifactLinks = async (root) => {
+  const dist = path.join(root, 'dist');
+  const files = (await readdir(dist, { recursive: true }))
+    .filter((name) => name.endsWith('.md') || name.endsWith('llms.txt'))
+    .sort();
+  return (
+    await Promise.all(
+      files.map(async (name) => [
+        name,
+        [
+          ...(await readFile(path.join(dist, name), 'utf8')).matchAll(
+            /\]\(([^)#?]+(?:\.md|llms\.txt))(?:[?#][^)]*)?\)/g,
+          ),
+        ].map(([, target]) => target),
+      ]),
+    )
+  ).flatMap(([name, targets]) => targets.map((target) => `${name}: ${target}`));
+};
+
 const put = async (root, name, content) => {
   const target = path.join(root, name);
   await mkdir(path.dirname(target), { recursive: true });
@@ -45,28 +82,7 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
       },
     }),
   );
-  await put(
-    root,
-    'astro.config.mjs',
-    `import { defineConfig } from 'astro/config';
-import starlight from '@astrojs/starlight';
-import { starlightLlmsTree } from 'starlight-llms-tree';
-export default defineConfig({
-  base: '/docs',
-  redirects: { '/legacy': '/docs/guide/' },
-  integrations: [starlight({
-    title: 'Fixture docs',
-    sidebar: [
-      { slug: 'guide' },
-      { slug: 'eclair' },
-      { label: 'Guides', items: [{ slug: 'guides/install' }, { slug: 'guide' }] },
-      { label: 'Reference', items: [{ slug: 'reference/api/endpoints' }] },
-    ],
-    plugins: [starlightLlmsTree()],
-  })],
-});
-`,
-  );
+  await put(root, 'astro.config.mjs', config({ navigation: true }));
   await put(
     root,
     'tsconfig.json',
@@ -499,6 +515,65 @@ tags: [éclair/child]
       await access(target);
     }
   }
+
+  await put(
+    root,
+    'src/content/docs/fr/guide.md',
+    `---
+title: Guide français
+lang: fr
+tags: [fr/guide]
+---
+
+Guide français.
+`,
+  );
+  await put(
+    root,
+    'astro.config.mjs',
+    config({
+      format: 'file',
+      locales: true,
+      site: 'https://deploy.example',
+      trailingSlash: 'never',
+    }),
+  );
+  await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
+  const fileFormatLinks = await artifactLinks(root);
+  assert.ok(fileFormatLinks.length > 0);
+  assert.ok(fileFormatLinks.every((link) => link.includes(': https://deploy.example/docs/')));
+  assert.ok(fileFormatLinks.some((link) => link.endsWith('https://deploy.example/docs/index.md')));
+  assert.ok(fileFormatLinks.some((link) => link.endsWith('https://deploy.example/docs/fr/guide.md')));
+  assert.deepEqual(
+    (await readdir(path.join(root, 'dist/fr'), { recursive: true }))
+      .filter((name) => name.endsWith('.md') || name.endsWith('llms.txt'))
+      .sort(),
+    ['guide.md', 'llms.txt'],
+  );
+  await assert.rejects(access(path.join(root, 'dist/fr.md')), { code: 'ENOENT' });
+  await assert.rejects(access(path.join(root, 'dist/docs')), { code: 'ENOENT' });
+  const rootIndex = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
+  const frenchIndex = await readFile(path.join(root, 'dist/fr/llms.txt'), 'utf8');
+  assert.doesNotMatch(rootIndex, /Guide français|https:\/\/deploy\.example\/docs\/fr\/(?:guide\.md|llms\.txt)/);
+  assert.match(frenchIndex, /\[Guide français\]\(https:\/\/deploy\.example\/docs\/fr\/guide\.md\)/);
+  assert.doesNotMatch(frenchIndex, /Changelog|Guide\]\(|Zulu/);
+
+  await put(
+    root,
+    'astro.config.mjs',
+    config({ locales: true, site: 'https://deploy.example', trailingSlash: 'always' }),
+  );
+  await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
+  assert.deepEqual(await artifactLinks(root), fileFormatLinks);
+  await assert.rejects(access(path.join(root, 'dist/docs')), { code: 'ENOENT' });
+
+  await put(
+    root,
+    'astro.config.mjs',
+    config({ format: 'preserve', locales: true, site: 'https://deploy.example' }),
+  );
+  await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
+  assert.deepEqual(await artifactLinks(root), fileFormatLinks);
 
   await put(root, 'public/index.md', 'existing file must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*index\.md/);

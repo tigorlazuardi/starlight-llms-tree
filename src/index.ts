@@ -15,6 +15,7 @@ export interface StarlightLlmsTreeOptions {}
 interface IndexPage {
   route: string;
   pathname: string;
+  locale?: string;
   title: string;
   description?: string;
   tags: string[];
@@ -22,15 +23,38 @@ interface IndexPage {
 }
 
 const compare = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
-const routeFromPathname = (pathname: string) => routePath(pathname).slice(1, -1);
+const publicPath = (pathname: string, base: string) => {
+  const route = routePath(pathname);
+  const baseRoute = routePath(base);
+  if (baseRoute === '/' || route.startsWith(baseRoute)) return route;
+  return routePath(`${baseRoute}${route.slice(1)}`);
+};
+const routeFromPathname = (pathname: string, base: string) => {
+  const finalPathname = publicPath(pathname, base);
+  const baseRoute = routePath(base);
+  const route =
+    baseRoute === '/'
+      ? finalPathname.slice(1, -1)
+      : finalPathname === baseRoute
+        ? ''
+        : finalPathname.slice(baseRoute.length, -1);
+  if (route.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new Error(`Unsafe generated route ${finalPathname}`);
+  }
+  return route;
+};
 const parentRoute = (route: string) => route.slice(0, Math.max(0, route.lastIndexOf('/')));
 const humanize = (route: string) => {
   const segment = route.slice(route.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
   return segment ? `${segment[0].toUpperCase()}${segment.slice(1)}` : segment;
 };
 const indexPath = (route: string) => (route ? `${route}/llms.txt` : 'llms.txt');
-const indexPublicPath = (route: string, base: string) =>
-  `${routePath(base)}${route ? `${route}/` : ''}llms.txt`;
+const artifactPublicUrl = (path: string, base: string, site?: string) => {
+  const pathname = `${routePath(base)}${path}`;
+  return site ? new URL(pathname, site).href : pathname;
+};
+const indexPublicPath = (route: string, base: string, site?: string) =>
+  artifactPublicUrl(indexPath(route), base, site);
 const renderMetadata = (label: 'Tags' | 'Scopes', values: string[]) =>
   values.length > 0 ? `\n  - ${label}: ${values.map((value) => `\`${value}\``).join(', ')}` : '';
 
@@ -39,6 +63,7 @@ const renderIndex = (
   pages: IndexPage[],
   folders: string[],
   base: string,
+  site: string | undefined,
   navigationOrder: Map<string, number>,
 ) => {
   const overview = pages.find(({ route }) => route === folder);
@@ -97,7 +122,7 @@ const renderIndex = (
       `## Folders\n\n${directFolders
         .map(
           ({ route, title: folderTitle, description, scopes }) =>
-            `- [${folderTitle}](${indexPublicPath(route, base)})${description ? `: ${description}` : ''}${renderMetadata('Scopes', scopes)}`,
+            `- [${folderTitle}](${indexPublicPath(route, base, site)})${description ? `: ${description}` : ''}${renderMetadata('Scopes', scopes)}`,
         )
         .join('\n')}`,
     );
@@ -105,64 +130,62 @@ const renderIndex = (
   return `${sections.join('\n\n')}\n`;
 };
 
-const publicPath = (pathname: string, base: string) => {
-  const route = routePath(pathname);
-  const baseRoute = routePath(base);
-  if (baseRoute === '/' || route.startsWith(baseRoute)) return route;
-  return routePath(`${baseRoute}${route.slice(1)}`);
-};
-const pageUrl = (dir: URL, pathname: string) => {
-  const route = pathname.replace(/^\/+/, '');
-  return new URL(
+const pageUrl = (dir: URL, route: string, format: 'directory' | 'file' | 'preserve') =>
+  new URL(
     route === ''
       ? 'index.html'
-      : route.replace(/\/$/, '') === '404'
+      : route === '404'
         ? '404.html'
-        : route.endsWith('/')
-          ? `${route}index.html`
-          : `${route}.html`,
+        : `${route}${format === 'directory' ? '/index' : ''}.html`,
     dir,
   );
-};
-const markdownUrl = (dir: URL, pathname: string) => {
-  const route = routePath(pathname).slice(1, -1);
-  return new URL(route === '' ? 'index.md' : `${route}.md`, dir);
-};
-const markdownPublicPath = (pathname: string, base: string) => {
-  const route = routePath(pathname);
-  return route === routePath(base) ? `${route}index.md` : `${route.slice(0, -1)}.md`;
-};
+const markdownUrl = (dir: URL, route: string) =>
+  new URL(route === '' ? 'index.md' : `${route}.md`, dir);
+const markdownPublicPath = (route: string, base: string, site?: string) =>
+  artifactPublicUrl(route === '' ? 'index.md' : `${route}.md`, base, site);
+const renderedPathname = (
+  route: string,
+  base: string,
+  format: 'directory' | 'file' | 'preserve',
+) => publicPath(format === 'file' ? `/${route || 'index'}.html` : `/${route}`, base);
 
-const integration = (base: string, owner: object): AstroIntegration => ({
+const integration = (
+  base: string,
+  site: string | undefined,
+  format: 'directory' | 'file' | 'preserve',
+  owner: object,
+): AstroIntegration => ({
   name: 'starlight-llms-tree',
   hooks: {
     'astro:build:done': async ({ dir, pages }) => {
       try {
         const collectionMetadata = readMetadata(owner);
         const docsPages = pages
-          .filter(({ pathname }) => routeFromPathname(pathname) !== '404')
           .flatMap(({ pathname }) => {
             const finalPathname = publicPath(pathname, base);
-            const metadata = collectionMetadata.get(finalPathname);
-            if (!metadata) return [];
-            const { navigation, ...frontmatter } = metadata;
-            return [
-              {
-                pathname,
-                finalPathname,
-                frontmatter,
-                navigation,
-                outputUrl: markdownUrl(dir, pathname),
-                outputPathname: markdownPublicPath(finalPathname, base),
-              },
-            ];
+            const route = routeFromPathname(finalPathname, base);
+            const metadata = collectionMetadata.get(renderedPathname(route, base, format));
+            return metadata
+              ? [
+                  {
+                    route,
+                    finalPathname,
+                    frontmatter: metadata.frontmatter,
+                    locale: metadata.locale,
+                    navigation: metadata.navigation,
+                    outputUrl: markdownUrl(dir, route),
+                    outputPathname: markdownPublicPath(route, base, site),
+                  },
+                ]
+              : [];
           })
+          .filter(({ route }) => route !== '404')
           .sort((left, right) => compare(left.finalPathname, right.finalPathname));
         const rootPathname = publicPath('/', base);
-        const root = docsPages.find(({ finalPathname }) => finalPathname === rootPathname);
+        const root = docsPages.find(({ route }) => route === '');
         if (!root) {
           throw new Error(
-            `starlight-llms-tree requires a root Starlight page at route ${rootPathname} targeting ${markdownPublicPath(rootPathname, base)}`,
+            `starlight-llms-tree requires a root Starlight page at route ${rootPathname} targeting ${markdownPublicPath('', base, site)}`,
           );
         }
 
@@ -197,8 +220,9 @@ const integration = (base: string, owner: object): AstroIntegration => ({
               );
             }
             return {
-              route: routeFromPathname(page.pathname),
+              route: page.route,
               pathname: page.finalPathname,
+              locale: page.locale,
               title: page.frontmatter.title as string,
               description:
                 typeof page.frontmatter.description === 'string' && page.frontmatter.description.trim()
@@ -210,9 +234,7 @@ const integration = (base: string, owner: object): AstroIntegration => ({
           });
         const navigationOrder = new Map<string, number>();
         for (const page of docsPages) {
-          const navigation = page.navigation;
-          if (!Array.isArray(navigation)) continue;
-          for (const href of navigation) {
+          for (const href of page.navigation) {
             if (typeof href !== 'string' || !href.startsWith('/')) continue;
             const pathname = routePath(decodeURI(new URL(href, 'https://starlight.invalid').pathname));
             if (generatedDocs.has(pathname) && !navigationOrder.has(pathname)) {
@@ -220,26 +242,34 @@ const integration = (base: string, owner: object): AstroIntegration => ({
             }
           }
         }
-        const folders = [
-          ...new Set([
-            '',
-            ...indexPages.flatMap(({ route }) => {
-              const segments = route.split('/');
-              return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'));
-            }),
-          ]),
-        ].sort(compare);
-        const folderSet = new Set(folders);
+        const pagesByLocale = new Map<string | undefined, IndexPage[]>();
         for (const page of indexPages) {
-          if (indexPages.some(({ route }) => route.startsWith(`${page.route}/`))) {
-            folderSet.add(page.route);
-          }
+          pagesByLocale.set(page.locale, [...(pagesByLocale.get(page.locale) ?? []), page]);
         }
-        const allFolders = [...folderSet].sort(compare);
-        const indexArtifacts = allFolders.map((folder) => ({
-          url: new URL(indexPath(folder), dir),
-          content: renderIndex(folder, indexPages, allFolders, base, navigationOrder),
-        }));
+        const indexArtifacts = [...pagesByLocale.entries()].flatMap(([locale, localePages]) => {
+          const folders = [
+            ...new Set([
+              locale ?? '',
+              ...localePages.flatMap(({ route }) => {
+                const segments = route.split('/');
+                return segments
+                  .slice(0, -1)
+                  .map((_, index) => segments.slice(0, index + 1).join('/'));
+              }),
+            ]),
+          ].sort(compare);
+          const folderSet = new Set(folders);
+          for (const page of localePages) {
+            if (localePages.some(({ route }) => route.startsWith(`${page.route}/`))) {
+              folderSet.add(page.route);
+            }
+          }
+          const allFolders = [...folderSet].sort(compare);
+          return allFolders.map((folder) => ({
+            url: new URL(indexPath(folder), dir),
+            content: renderIndex(folder, localePages, allFolders, base, site, navigationOrder),
+          }));
+        });
         for (const artifact of indexArtifacts) {
           if (outputTargets.has(artifact.url.href)) {
             throw new Error(`Duplicate generated output target ${artifact.url.pathname}`);
@@ -251,7 +281,7 @@ const integration = (base: string, owner: object): AstroIntegration => ({
           docsPages.map(async (page) => {
             let html: string;
             try {
-              html = await readFile(pageUrl(dir, page.pathname), 'utf8');
+              html = await readFile(pageUrl(dir, page.route, format), 'utf8');
             } catch (error) {
               throw new Error(
                 `Failed to read rendered page ${page.finalPathname} for ${page.outputUrl.pathname}`,
@@ -295,12 +325,18 @@ export const starlightLlmsTree = (_options: StarlightLlmsTreeOptions = {}) => ({
     }: {
       addIntegration(integration: AstroIntegration): void;
       addRouteMiddleware(config: { entrypoint: string }): void;
-      astroConfig: { base: string };
+      astroConfig: {
+        base: string;
+        site?: string;
+        build: { format: 'directory' | 'file' | 'preserve' };
+      };
     }) => {
       const owner = acquireMetadataOwner();
       try {
         addRouteMiddleware({ entrypoint: new URL('./metadata-middleware.js', import.meta.url).href });
-        addIntegration(integration(astroConfig.base, owner));
+        addIntegration(
+          integration(astroConfig.base, astroConfig.site, astroConfig.build.format, owner),
+        );
       } catch (error) {
         releaseMetadataOwner(owner);
         throw error;
