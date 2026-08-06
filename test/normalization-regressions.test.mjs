@@ -36,10 +36,20 @@ test('concurrent build ownership fails closed without leaking pathname metadata'
       },
       async () => new Response(),
     );
+    await onRequest(
+      {
+        locals: {
+          starlightRoute: { entry: { data: { title: 'Fallback copy' } }, isFallback: true },
+        },
+        url: new URL('https://example.test/docs/fr/guide/'),
+      },
+      async () => new Response(),
+    );
     assert.throws(acquireMetadataOwner, /does not support concurrent builds/);
     assert.throws(() => readMetadata({}), /owner does not match active build/);
     assert.equal(readMetadata(firstOwner).get('/docs/').title, 'First build');
     assert.deepEqual(readMetadata(firstOwner).get('/docs/unicode/é/').tags, ['unicode']);
+    assert.equal(readMetadata(firstOwner).has('/docs/fr/guide/'), false);
   } finally {
     releaseMetadataOwner(firstOwner);
   }

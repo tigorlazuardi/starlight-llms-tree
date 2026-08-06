@@ -40,10 +40,13 @@ export const releaseMetadataOwner = (owner: Owner) => {
 };
 
 export const onRequest: MiddlewareHandler = (context, next) => {
-  const route = (context.locals as { starlightRoute?: { entry?: { data?: Record<string, unknown> } } })
-    .starlightRoute;
+  const route = (
+    context.locals as {
+      starlightRoute?: { entry?: { data?: Record<string, unknown> }; isFallback?: boolean };
+    }
+  ).starlightRoute;
   const current = state();
-  if (route?.entry?.data && current) {
+  if (route?.entry?.data && !route.isFallback && current) {
     current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), route.entry.data);
   }
   return next();
