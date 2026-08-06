@@ -3,9 +3,13 @@ import { routePath } from './route.js';
 
 const metadataKey = Symbol.for('starlight-llms-tree.frontmatter');
 type Owner = object;
+interface MetadataRecord {
+  frontmatter: Record<string, unknown>;
+  locale?: string;
+}
 interface MetadataState {
   owner: Owner;
-  records: Map<string, Record<string, unknown>>;
+  records: Map<string, MetadataRecord>;
 }
 
 const state = () =>
@@ -40,11 +44,21 @@ export const releaseMetadataOwner = (owner: Owner) => {
 };
 
 export const onRequest: MiddlewareHandler = (context, next) => {
-  const route = (context.locals as { starlightRoute?: { entry?: { data?: Record<string, unknown> } } })
-    .starlightRoute;
+  const route = (
+    context.locals as {
+      starlightRoute?: {
+        entry?: { data?: Record<string, unknown> };
+        isFallback?: boolean;
+        locale?: string;
+      };
+    }
+  ).starlightRoute;
   const current = state();
-  if (route?.entry?.data && current) {
-    current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), route.entry.data);
+  if (route?.entry?.data && !route.isFallback && current) {
+    current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), {
+      frontmatter: route.entry.data,
+      locale: route.locale,
+    });
   }
   return next();
 };
