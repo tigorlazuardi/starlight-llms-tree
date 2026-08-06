@@ -96,7 +96,7 @@ import { Aside, FileTree, TabItem, Tabs } from '@astrojs/starlight/components';
 
 Welcome to the packed consumer. This content must remain readable.
 
-## Install
+## Install [guide heading](/docs/guide/#start) with \`code\`
 
 - First item
 - Second item
@@ -107,7 +107,11 @@ Welcome to the packed consumer. This content must remain readable.
 
 <ol reversed start="8"><li>Eighth</li><li value="4">Fourth</li><li>Third</li></ol>
 
-<table><thead><tr><th>Tool</th><th>Ready</th></tr></thead><tbody><tr><td>Pack</td><td>yes</td></tr></tbody></table>
+<table><thead><tr><th>Tool</th><th>Ready</th></tr></thead><tbody><tr><td><a href="/docs/guide/#start">Pack</a></td><td>yes</td></tr></tbody></table>
+
+<video controls src="/docs/demo.mp4"><source src="/docs/demo.webm" type="video/webm" />Video fallback</video>
+
+<iframe src="https://example.com/embed" title="Demo"></iframe>
 
 <Aside type="tip" title="Remember">Keep **semantic content**.</Aside>
 
@@ -233,12 +237,14 @@ category: reference
   assert.equal(frontmatter.sidebar.label, 'Packed overview');
   assert.equal(frontmatter.sidebar.hidden, false);
   assert.match(markdown, /Welcome to the packed consumer\. This content must remain readable\./);
-  assert.match(markdown, /## Install/);
+  assert.match(markdown, /## Install \[guide heading\]\(\/docs\/guide\.md#start\) with `code`/);
   assert.match(markdown, /- First item\n- Second item/);
   assert.match(markdown, /3\. Third\n7\. Seventh\n8\. Eighth/);
   assert.match(markdown, /3\. Third\n2\. Second\n1\. First/);
   assert.match(markdown, /8\. Eighth\n4\. Fourth\n3\. Third/);
-  assert.match(markdown, /<table><thead><tr><th>Tool<\/th><th>Ready<\/th><\/tr><\/thead><tbody><tr><td>Pack<\/td><td>yes<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /<table><thead><tr><th>Tool<\/th><th>Ready<\/th><\/tr><\/thead><tbody><tr><td><a href="\/docs\/guide\.md#start">Pack<\/a><\/td><td>yes<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /<video controls="" src="\/docs\/demo\.mp4"><source src="\/docs\/demo\.webm" type="video\/webm">Video fallback<\/video>/);
+  assert.match(markdown, /<iframe src="https:\/\/example\.com\/embed" title="Demo"><\/iframe>/);
   assert.match(markdown, /> \[!TIP\]\n> \*\*Remember\*\*\n> Keep \*\*semantic content\*\*\./);
   assert.match(markdown, /### npm\n\n`npm install package`/);
   assert.match(markdown, /### pnpm\n\n`pnpm add package`/);

@@ -72,7 +72,8 @@ test('normalization treats script and style bodies as raw text before page conte
 test('normalization preserves Markdown semantics and rewrites explicit index routes', () => {
   const markdown = normalize(page(`
 <p>Literal &lt;Widget&gt;, \\ slash, [brackets], *stars*, and _underscores_.<br>Next line.</p>
-<p># literal heading and ~~strike~~ | pipe</p>
+<p># literal heading and ~~strike~~ | pipe &copy;</p>
+<h2>Rich <a href="/docs/guide/#start">heading</a> with <code>code</code><a class="sl-anchor-link" href="#rich">#</a></h2>
 <ul><li>parent<ul><li>child</li></ul></li></ul>
 <pre><code class="language-js">if (ready) {
   console.log('indented');
@@ -85,13 +86,16 @@ test('normalization preserves Markdown semantics and rewrites explicit index rou
 <ol start="3"><li>Three</li><li value="7">Seven</li><li>Eight</li></ol>
 <ol reversed><li>Three</li><li>Two</li><li>One</li></ol>
 <ol reversed start="8"><li>Eight</li><li value="4">Four</li><li>Three</li></ol>
-<table class="results"><thead><tr><th>Name</th><th>Score</th></tr></thead><tbody><tr><td>Ada</td><td>10</td></tr></tbody></table>
+<table class="results"><thead><tr><th>Name</th><th>Score</th></tr></thead><tbody><tr><td><a href="/docs/guide/#start">Ada</a></td><td>10</td></tr></tbody></table>
+<video controls src="/docs/demo.mp4"><source src="/docs/demo.webm" type="video/webm">Fallback</video>
+<iframe src="https://example.com/embed" title="Demo"></iframe>
 <aside class="starlight-aside starlight-aside--tip"><p class="starlight-aside__title"><svg aria-hidden="true"></svg>Remember</p><div class="starlight-aside__content"><p>Keep body.</p></div></aside>
 `));
 
   assert.ok(markdown.includes('Literal \\<Widget\\>, \\\\ slash, \\[brackets\\], \\*stars\\*, and \\_underscores\\_.'));
   assert.match(markdown, /underscores\\_\.  \nNext line\./);
-  assert.ok(markdown.includes('\\# literal heading and \\~\\~strike\\~\\~ \\| pipe'));
+  assert.ok(markdown.includes('\\# literal heading and \\~\\~strike\\~\\~ \\| pipe ©'));
+  assert.match(markdown, /## Rich \[heading\]\(\/docs\/guide\.md#start\) with `code`/);
   assert.match(markdown, /- parent\n  - child/);
   assert.match(markdown, /`````js\nif \(ready\) \{\n  console\.log\('indented'\);\n\}\n````\n`````/);
   assert.match(markdown, /`` a`b `` `  edge  `/);
@@ -107,7 +111,9 @@ test('normalization preserves Markdown semantics and rewrites explicit index rou
   assert.match(markdown, /3\. Three\n7\. Seven\n8\. Eight/);
   assert.match(markdown, /3\. Three\n2\. Two\n1\. One/);
   assert.match(markdown, /8\. Eight\n4\. Four\n3\. Three/);
-  assert.match(markdown, /<table class="results"><thead><tr><th>Name<\/th><th>Score<\/th><\/tr><\/thead><tbody><tr><td>Ada<\/td><td>10<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /<table class="results"><thead><tr><th>Name<\/th><th>Score<\/th><\/tr><\/thead><tbody><tr><td><a href="\/docs\/guide\.md#start">Ada<\/a><\/td><td>10<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /<video controls="" src="\/docs\/demo\.mp4"><source src="\/docs\/demo\.webm" type="video\/webm">Fallback<\/video>/);
+  assert.match(markdown, /<iframe src="https:\/\/example\.com\/embed" title="Demo"><\/iframe>/);
   assert.match(markdown, /> \[!TIP\]\n> \*\*Remember\*\*\n> Keep body\./);
   assert.match(markdown, /^---\n\{[\s\S]*"pagefind": false[\s\S]*\n---/);
 });

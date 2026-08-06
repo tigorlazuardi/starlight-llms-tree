@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'astro';
+import { routePath } from './route.js';
 
 const metadataKey = Symbol.for('starlight-llms-tree.frontmatter');
 type Owner = object;
@@ -36,11 +37,6 @@ export const releaseMetadataOwner = (owner: Owner) => {
   }
   current.records.clear();
   delete globalState[metadataKey];
-};
-
-const routePath = (pathname: string) => {
-  const normalized = `/${pathname.replace(/^\/+|\/+$/g, '')}`;
-  return normalized === '/' ? '/' : `${normalized}/`;
 };
 
 export const onRequest: MiddlewareHandler = (context, next) => {

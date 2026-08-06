@@ -1,4 +1,6 @@
 import { posix } from 'node:path';
+import { parse, type DefaultTreeAdapterTypes } from 'parse5';
+import { routePath } from './route.js';
 
 interface ElementNode {
   type: 'element';
@@ -31,111 +33,29 @@ const voidElements = new Set([
   'wbr',
 ]);
 
-const decodeEntities = (value: string) =>
-  value.replace(/&(#(?:x[\da-f]+|\d+)|amp|apos|gt|lt|quot|nbsp);/gi, (_, entity: string) => {
-    const named: Record<string, string> = {
-      amp: '&',
-      apos: "'",
-      gt: '>',
-      lt: '<',
-      nbsp: ' ',
-      quot: '"',
-    };
-    if (!entity.startsWith('#')) return named[entity.toLowerCase()] ?? `&${entity};`;
-    const hex = entity[1]?.toLowerCase() === 'x';
-    const codePoint = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-    return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff
-      ? String.fromCodePoint(codePoint)
-      : `&${entity};`;
-  });
-
-const parseAttributes = (source: string) => {
-  const attributes: Record<string, string> = {};
-  const pattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
-  for (let match = pattern.exec(source); match; match = pattern.exec(source)) {
-    attributes[match[1].toLowerCase()] = decodeEntities(match[2] ?? match[3] ?? match[4] ?? '');
-  }
-  return attributes;
-};
-
-// ponytail: rendered Astro HTML needs quote-aware tags and valid raw text, not HTML5 error recovery; use a parser if malformed input becomes supported.
-const tokenizeHtml = (html: string) => {
-  const tokens: string[] = [];
-  let start = 0;
-  while (start < html.length) {
-    const opening = html.indexOf('<', start);
-    if (opening < 0) {
-      tokens.push(html.slice(start));
-      break;
-    }
-    if (opening > start) tokens.push(html.slice(start, opening));
-    if (html.startsWith('<!--', opening)) {
-      const end = html.indexOf('-->', opening + 4);
-      tokens.push(html.slice(opening, end < 0 ? html.length : end + 3));
-      start = end < 0 ? html.length : end + 3;
-      continue;
-    }
-    let quote = '';
-    let end = opening + 1;
-    for (; end < html.length; end += 1) {
-      const character = html[end];
-      if (quote) {
-        if (character === quote) quote = '';
-      } else if (character === '"' || character === "'") quote = character;
-      else if (character === '>') break;
-    }
-    if (end === html.length) {
-      tokens.push(html.slice(opening));
-      break;
-    }
-    const tagToken = html.slice(opening, end + 1);
-    tokens.push(tagToken);
-    start = end + 1;
-
-    const rawTextTag = tagToken.match(/^<(script|style)(?:\s|>)/i)?.[1];
-    if (rawTextTag) {
-      const closingTag = new RegExp(`</${rawTextTag}\\s*>`, 'gi');
-      closingTag.lastIndex = start;
-      const match = closingTag.exec(html);
-      if (!match) {
-        tokens.push(html.slice(start));
-        break;
-      }
-      tokens.push(html.slice(start, match.index), match[0]);
-      start = closingTag.lastIndex;
-    }
-  }
-  return tokens;
-};
-
 const parseHtml = (html: string): ElementNode => {
-  const root: ElementNode = { type: 'element', tag: 'root', attributes: {}, children: [] };
-  const stack = [root];
-  for (const token of tokenizeHtml(html)) {
-    if (token.startsWith('<!--') || token.startsWith('<!')) continue;
-    if (!token.startsWith('<') || !/^<\/?[a-zA-Z]/.test(token)) {
-      stack.at(-1)?.children.push({ type: 'text', value: token });
-      continue;
-    }
-    if (token.startsWith('</')) {
-      const tag = token.slice(2).match(/^\s*([^\s>]+)/)?.[1]?.toLowerCase();
-      let index = stack.length - 1;
-      while (index > 0 && stack[index]?.tag !== tag) index -= 1;
-      if (index > 0) stack.length = index;
-      continue;
-    }
-    const tag = token.slice(1).match(/^\s*([^\s/>]+)/)?.[1]?.toLowerCase();
-    if (!tag) continue;
-    const node: ElementNode = {
+  const convert = (node: DefaultTreeAdapterTypes.ChildNode): HtmlNode | undefined => {
+    if ('value' in node) return { type: 'text', value: node.value };
+    if (!('tagName' in node)) return;
+    return {
       type: 'element',
-      tag,
-      attributes: parseAttributes(token.slice(token.indexOf(tag) + tag.length, -1)),
-      children: [],
+      tag: node.tagName,
+      attributes: Object.fromEntries(node.attrs.map(({ name, value }) => [name, value])),
+      children: node.childNodes.flatMap((child) => {
+        const converted = convert(child);
+        return converted ? [converted] : [];
+      }),
     };
-    stack.at(-1)?.children.push(node);
-    if (!voidElements.has(tag) && !/\/\s*>$/.test(token)) stack.push(node);
-  }
-  return root;
+  };
+  return {
+    type: 'element',
+    tag: 'root',
+    attributes: {},
+    children: parse(html).childNodes.flatMap((node) => {
+      const converted = convert(node);
+      return converted ? [converted] : [];
+    }),
+  };
 };
 
 const hasClass = (node: ElementNode, name: string) =>
@@ -152,14 +72,9 @@ const findElement = (node: ElementNode, predicate: (node: ElementNode) => boolea
 };
 
 const plainText = (node: HtmlNode): string =>
-  node.type === 'text' ? decodeEntities(node.value) : node.children.map(plainText).join('');
+  node.type === 'text' ? node.value : node.children.map(plainText).join('');
 
 const cleanText = (node: HtmlNode) => plainText(node).replace(/\s+/g, ' ').trim();
-
-const routePath = (pathname: string) => {
-  const normalized = `/${pathname.replace(/^\/+|\/+$/g, '')}`;
-  return normalized === '/' ? '/' : `${normalized}/`;
-};
 
 const rewriteDocsLink = (
   href: string,
@@ -194,7 +109,7 @@ const normalizeBlocks = (value: string) =>
     .replace(/^[ \t]+|[ \t]+$/g, '');
 
 const escapeGfmText = (value: string) =>
-  decodeEntities(value)
+  value
     .replace(/\s+/g, ' ')
     .replace(/&/g, '&amp;')
     .replace(/[\\`*_[\]<>~|]/g, '\\$&')
@@ -207,6 +122,37 @@ const escapeHtmlAttribute = (value: string) =>
 const codeDelimiter = (value: string, minimum: number) => {
   const longest = Math.max(0, ...Array.from(value.matchAll(/`+/g), (match) => match[0].length));
   return '`'.repeat(Math.max(minimum, longest + 1));
+};
+
+const renderRaw = (
+  node: ElementNode,
+  pagePathname: string,
+  generatedDocs: ReadonlyMap<string, string>,
+): string => {
+  if (
+    ['script', 'style', 'svg', 'template'].includes(node.tag) ||
+    node.attributes['aria-hidden'] === 'true' ||
+    hasClass(node, 'sr-only') ||
+    hasClass(node, 'sl-anchor-link') ||
+    hasClass(node, 'tablist-wrapper')
+  )
+    return '';
+  const attributes = Object.entries(node.attributes)
+    .map(([name, value]) => {
+      const rewritten = name === 'href' ? rewriteDocsLink(value, pagePathname, generatedDocs) : value;
+      return ` ${name}="${escapeHtmlAttribute(rewritten)}"`;
+    })
+    .join('');
+  const children = node.children
+    .map((child) =>
+      child.type === 'text'
+        ? child.value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        : renderRaw(child, pagePathname, generatedDocs),
+    )
+    .join('');
+  return voidElements.has(node.tag)
+    ? `<${node.tag}${attributes}>`
+    : `<${node.tag}${attributes}>${children}</${node.tag}>`;
 };
 
 const renderMarkdown = (
@@ -250,25 +196,6 @@ const renderMarkdown = (
       })
       .join('\n')}\n\n`;
   };
-  const renderRaw = (node: ElementNode): string => {
-    if (['script', 'style', 'svg', 'template'].includes(node.tag)) return '';
-    const attributes = Object.entries(node.attributes)
-      .map(([name, value]) => ` ${name}="${escapeHtmlAttribute(value)}"`)
-      .join('');
-    const children = node.children
-      .map((child) =>
-        child.type === 'text'
-          ? decodeEntities(child.value)
-              .replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-          : renderRaw(child),
-      )
-      .join('');
-    return voidElements.has(node.tag)
-      ? `<${node.tag}${attributes}>`
-      : `<${node.tag}${attributes}>${children}</${node.tag}>`;
-  };
   const render = (node: HtmlNode): string => {
     if (node.type === 'text') return escapeGfmText(node.value);
     if (
@@ -284,7 +211,7 @@ const renderMarkdown = (
       return `### ${escapeGfmText(label)}\n\n${renderChildren(node)}\n\n`;
     }
     if (/^h[1-6]$/.test(node.tag))
-      return `${'#'.repeat(Number(node.tag[1]))} ${escapeGfmText(cleanText(node))}\n\n`;
+      return `${'#'.repeat(Number(node.tag[1]))} ${normalizeBlocks(renderChildren(node))}\n\n`;
     if (node.tag === 'p') return `${renderChildren(node)}\n\n`;
     if (node.tag === 'br') return '  \n';
     if (node.tag === 'hr') return '\n---\n\n';
@@ -343,8 +270,10 @@ const renderMarkdown = (
       return `<details>\n<summary>${escapeGfmText(label)}</summary>\n\n${normalizeBlocks(body)}\n\n</details>\n\n`;
     }
     if (node.tag === 'summary') return '';
-    if (['kbd', 'mark', 'sub', 'sup', 'abbr'].includes(node.tag)) return renderRaw(node);
-    if (node.tag === 'table') return `${renderRaw(node)}\n\n`;
+    if (['kbd', 'mark', 'sub', 'sup', 'abbr'].includes(node.tag))
+      return renderRaw(node, pagePathname, generatedDocs);
+    if (['table', 'video', 'audio', 'iframe', 'picture', 'source', 'track'].includes(node.tag))
+      return `${renderRaw(node, pagePathname, generatedDocs)}\n\n`;
     if (['figure', 'figcaption'].includes(node.tag)) return `${renderChildren(node)}\n\n`;
     return renderChildren(node);
   };
