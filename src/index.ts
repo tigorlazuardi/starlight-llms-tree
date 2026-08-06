@@ -1,106 +1,41 @@
 import { readFile } from 'node:fs/promises';
 import type { AstroIntegration } from 'astro';
-import { pageTags } from './metadata.js';
+import {
+  acquireMetadataOwner,
+  readMetadata,
+  releaseMetadataOwner,
+} from './metadata-middleware.js';
+import { normalizeStarlightPage } from './normalize.js';
 import { publishGeneratedArtifacts } from './publish.js';
+import { routePath } from './route.js';
 
 /** Options for the Starlight LLMs Tree plugin. */
 export interface StarlightLlmsTreeOptions {}
 
-interface Page {
+interface IndexPage {
   route: string;
   title: string;
   description?: string;
   tags: string[];
-  markdown: string;
+  outputPathname: string;
 }
 
 const compare = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
-
-const decodeEntities = (value: string) =>
-  value.replace(/&(#(?:x[\da-f]+|\d+)|amp|apos|gt|lt|quot);/gi, (_, entity: string) => {
-    const named: Record<string, string> = {
-      amp: '&',
-      apos: "'",
-      gt: '>',
-      lt: '<',
-      quot: '"',
-    };
-    if (!entity.startsWith('#')) return named[entity.toLowerCase()] ?? `&${entity};`;
-    const hex = entity[1]?.toLowerCase() === 'x';
-    const codePoint = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-    return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff
-      ? String.fromCodePoint(codePoint)
-      : `&${entity};`;
-  });
-
-const text = (html: string) =>
-  decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
-
-const markdownContent = (html: string) => {
-  const start = html.search(/<div\b[^>]*class="[^"]*\bsl-markdown-content\b[^"]*"[^>]*>/i);
-  if (start === -1) throw new Error('Starlight page has no .sl-markdown-content element');
-
-  const tags = /<\/?div\b[^>]*>/gi;
-  tags.lastIndex = start;
-  let depth = 0;
-  let contentStart = -1;
-  for (let match = tags.exec(html); match; match = tags.exec(html)) {
-    if (!match[0].startsWith('</')) {
-      depth += 1;
-      if (contentStart === -1) contentStart = tags.lastIndex;
-    } else if (--depth === 0) {
-      return html.slice(contentStart, match.index);
-    }
-  }
-  throw new Error('Starlight page has an unclosed .sl-markdown-content element');
-};
-
-const htmlToMarkdown = (html: string) =>
-  decodeEntities(
-    html
-      .replace(/<!--[\s\S]*?-->|<(script|style|svg)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
-      .replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, label) =>
-        `[${text(label)}](${decodeEntities(href)})`,
-      )
-      .replace(/<h([2-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level, value) =>
-        `${'#'.repeat(Number(level))} ${text(value)}\n\n`,
-      )
-      .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
-      .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
-      .replace(/<li\b[^>]*>/gi, '- ')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(p|li|ul|ol|blockquote|pre)>/gi, '\n\n')
-      .replace(/<[^>]+>/g, ''),
-  )
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-const routeFromPathname = (pathname: string) => {
-  const route = pathname.replace(/^\/+|\/+$/g, '');
-  if (route.split('/').some((segment) => segment === '.' || segment === '..')) {
-    throw new Error(`Unsafe generated route ${pathname}`);
-  }
-  return route;
-};
-
+const routeFromPathname = (pathname: string) => routePath(pathname).slice(1, -1);
 const parentRoute = (route: string) => route.slice(0, Math.max(0, route.lastIndexOf('/')));
 const humanize = (route: string) => {
   const segment = route.slice(route.lastIndexOf('/') + 1).replace(/[-_]+/g, ' ');
   return segment ? `${segment[0].toUpperCase()}${segment.slice(1)}` : segment;
 };
-const markdownPath = (route: string) => (route ? `${route}.md` : 'index.md');
 const indexPath = (route: string) => (route ? `${route}/llms.txt` : 'llms.txt');
-const link = (target: string) => `/${target}`;
-
+const indexPublicPath = (route: string, base: string) =>
+  `${routePath(base)}${route ? `${route}/` : ''}llms.txt`;
 const renderMetadata = (label: 'Tags' | 'Scopes', values: string[]) =>
   values.length > 0 ? `\n  - ${label}: ${values.map((value) => `\`${value}\``).join(', ')}` : '';
 
-const renderIndex = (folder: string, pages: Page[], folders: string[]) => {
+const renderIndex = (folder: string, pages: IndexPage[], folders: string[], base: string) => {
   const overview = pages.find(({ route }) => route === folder);
   const title = overview?.title ?? humanize(folder);
-  const description = overview?.description;
   const folderSet = new Set(folders);
   const directPages = pages
     .filter(({ route }) =>
@@ -130,13 +65,13 @@ const renderIndex = (folder: string, pages: Page[], folders: string[]) => {
     })
     .sort((left, right) => compare(left.title, right.title));
 
-  const sections = [`# ${title}`, ...(description ? [`> ${description}`] : [])];
+  const sections = [`# ${title}`, ...(overview?.description ? [`> ${overview.description}`] : [])];
   if (directPages.length > 0) {
     sections.push(
       `## Pages\n\n${directPages
         .map(
           (page) =>
-            `- [${page.route === folder ? 'Overview' : page.title}](${link(markdownPath(page.route))})${page.description ? `: ${page.description}` : ''}${renderMetadata('Tags', page.tags)}`,
+            `- [${page.route === folder ? 'Overview' : page.title}](${page.outputPathname})${page.description ? `: ${page.description}` : ''}${renderMetadata('Tags', page.tags)}`,
         )
         .join('\n')}`,
     );
@@ -145,8 +80,8 @@ const renderIndex = (folder: string, pages: Page[], folders: string[]) => {
     sections.push(
       `## Folders\n\n${directFolders
         .map(
-          ({ route, title: folderTitle, description: folderDescription, scopes }) =>
-            `- [${folderTitle}](${link(indexPath(route))})${folderDescription ? `: ${folderDescription}` : ''}${renderMetadata('Scopes', scopes)}`,
+          ({ route, title: folderTitle, description, scopes }) =>
+            `- [${folderTitle}](${indexPublicPath(route, base)})${description ? `: ${description}` : ''}${renderMetadata('Scopes', scopes)}`,
         )
         .join('\n')}`,
     );
@@ -154,61 +89,168 @@ const renderIndex = (folder: string, pages: Page[], folders: string[]) => {
   return `${sections.join('\n\n')}\n`;
 };
 
-const integration = (): AstroIntegration => ({
+const publicPath = (pathname: string, base: string) => {
+  const route = routePath(pathname);
+  const baseRoute = routePath(base);
+  if (baseRoute === '/' || route.startsWith(baseRoute)) return route;
+  return routePath(`${baseRoute}${route.slice(1)}`);
+};
+const pageUrl = (dir: URL, pathname: string) => {
+  const route = pathname.replace(/^\/+/, '');
+  return new URL(
+    route === ''
+      ? 'index.html'
+      : route.replace(/\/$/, '') === '404'
+        ? '404.html'
+        : route.endsWith('/')
+          ? `${route}index.html`
+          : `${route}.html`,
+    dir,
+  );
+};
+const markdownUrl = (dir: URL, pathname: string) => {
+  const route = routePath(pathname).slice(1, -1);
+  return new URL(route === '' ? 'index.md' : `${route}.md`, dir);
+};
+const markdownPublicPath = (pathname: string, base: string) => {
+  const route = routePath(pathname);
+  return route === routePath(base) ? `${route}index.md` : `${route.slice(0, -1)}.md`;
+};
+
+const integration = (base: string, owner: object): AstroIntegration => ({
   name: 'starlight-llms-tree',
   hooks: {
-    'astro:config:setup': () => pageTags.clear(),
-    'astro:build:done': async ({ dir, pages: builtPages }) => {
-      const pages: Page[] = [];
-      for (const { pathname } of builtPages) {
-        const route = routeFromPathname(pathname);
-        if (route === '404') continue;
-        const html = await readFile(new URL(route ? `${route}/index.html` : 'index.html', dir), 'utf8');
-        const titleMatch = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-        if (!titleMatch) throw new Error(`Starlight page ${pathname} has no h1 title`);
-        const descriptionMatch = html.match(
-          /<meta\b(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["']([^"']*)["'])[^>]*>/i,
-        );
-        pages.push({
-          route,
-          title: text(titleMatch[1]),
-          description: descriptionMatch ? decodeEntities(descriptionMatch[1]).trim() || undefined : undefined,
-          tags: pageTags.get(route) ?? [],
-          markdown: htmlToMarkdown(markdownContent(html)),
-        });
-      }
+    'astro:build:done': async ({ dir, pages }) => {
+      try {
+        const collectionMetadata = readMetadata(owner);
+        const docsPages = pages
+          .flatMap(({ pathname }) => {
+            const finalPathname = publicPath(pathname, base);
+            const frontmatter = collectionMetadata.get(finalPathname);
+            return frontmatter
+              ? [
+                  {
+                    pathname,
+                    finalPathname,
+                    frontmatter,
+                    outputUrl: markdownUrl(dir, pathname),
+                    outputPathname: markdownPublicPath(finalPathname, base),
+                  },
+                ]
+              : [];
+          })
+          .sort((left, right) => compare(left.finalPathname, right.finalPathname));
+        const rootPathname = publicPath('/', base);
+        const root = docsPages.find(({ finalPathname }) => finalPathname === rootPathname);
+        if (!root) {
+          throw new Error(
+            `starlight-llms-tree requires a root Starlight page at route ${rootPathname} targeting ${markdownPublicPath(rootPathname, base)}`,
+          );
+        }
 
-      if (!pages.some(({ route }) => route === '')) {
-        throw new Error('starlight-llms-tree requires a root Starlight page');
-      }
-
-      const folders = [
-        ...new Set([
-          '',
-          ...pages.flatMap(({ route }) => {
-            const segments = route.split('/');
-            return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'));
-          }),
-        ]),
-      ].sort(compare);
-      const folderSet = new Set(folders);
-      for (const page of pages) {
-        if (pages.some(({ route }) => route.startsWith(`${page.route}/`))) folderSet.add(page.route);
-      }
-      const allFolders = [...folderSet].sort(compare);
-      const manifest = [
-        ...pages.map(({ route, title, markdown }) => ({
-          url: new URL(markdownPath(route), dir),
-          content: `# ${title}\n\n${markdown}\n`,
-        })),
-        ...allFolders.map((folder) => ({
+        const generatedDocs = new Map<string, string>();
+        const outputTargets = new Set<string>();
+        for (const page of docsPages) {
+          if (generatedDocs.has(page.finalPathname)) {
+            throw new Error(
+              `Duplicate generated page route ${page.finalPathname} targeting ${page.outputUrl.pathname}`,
+            );
+          }
+          if (outputTargets.has(page.outputUrl.href)) {
+            throw new Error(
+              `Duplicate generated output target ${page.outputUrl.pathname} for route ${page.finalPathname}`,
+            );
+          }
+          generatedDocs.set(page.finalPathname, page.outputPathname);
+          outputTargets.add(page.outputUrl.href);
+        }
+        for (const page of docsPages) {
+          if (typeof page.frontmatter.title !== 'string' || !page.frontmatter.title.trim()) {
+            throw new Error(
+              `Normalized Starlight page ${page.finalPathname} for ${page.outputUrl.pathname} has no title`,
+            );
+          }
+        }
+        const indexPages: IndexPage[] = docsPages
+          .filter(({ pathname }) => routeFromPathname(pathname) !== '404')
+          .map((page) => {
+            const tags = page.frontmatter.tags ?? [];
+            if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) {
+              throw new Error(
+                `Starlight page tags for route ${page.finalPathname} targeting ${page.outputUrl.pathname} must be an array of strings`,
+              );
+            }
+            return {
+              route: routeFromPathname(page.pathname),
+              title: page.frontmatter.title as string,
+              description:
+                typeof page.frontmatter.description === 'string' && page.frontmatter.description.trim()
+                  ? page.frontmatter.description
+                  : undefined,
+              tags,
+              outputPathname: page.outputPathname,
+            };
+          });
+        const folders = [
+          ...new Set([
+            '',
+            ...indexPages.flatMap(({ route }) => {
+              const segments = route.split('/');
+              return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'));
+            }),
+          ]),
+        ].sort(compare);
+        const folderSet = new Set(folders);
+        for (const page of indexPages) {
+          if (indexPages.some(({ route }) => route.startsWith(`${page.route}/`))) {
+            folderSet.add(page.route);
+          }
+        }
+        const allFolders = [...folderSet].sort(compare);
+        const indexArtifacts = allFolders.map((folder) => ({
           url: new URL(indexPath(folder), dir),
-          content: renderIndex(folder, pages, allFolders),
-        })),
-      ];
+          content: renderIndex(folder, indexPages, allFolders, base),
+        }));
+        for (const artifact of indexArtifacts) {
+          if (outputTargets.has(artifact.url.href)) {
+            throw new Error(`Duplicate generated output target ${artifact.url.pathname}`);
+          }
+          outputTargets.add(artifact.url.href);
+        }
 
-      pageTags.clear();
-      await publishGeneratedArtifacts(manifest);
+        const pageArtifacts = await Promise.all(
+          docsPages.map(async (page) => {
+            let html: string;
+            try {
+              html = await readFile(pageUrl(dir, page.pathname), 'utf8');
+            } catch (error) {
+              throw new Error(
+                `Failed to read rendered page ${page.finalPathname} for ${page.outputUrl.pathname}`,
+                { cause: error },
+              );
+            }
+            try {
+              return {
+                url: page.outputUrl,
+                content: normalizeStarlightPage(
+                  html,
+                  page.frontmatter,
+                  generatedDocs,
+                  page.finalPathname,
+                ),
+              };
+            } catch (error) {
+              throw new Error(
+                `Failed to normalize page ${page.finalPathname} for ${page.outputUrl.pathname}`,
+                { cause: error },
+              );
+            }
+          }),
+        );
+        await publishGeneratedArtifacts([...pageArtifacts, ...indexArtifacts]);
+      } finally {
+        releaseMetadataOwner(owner);
+      }
     },
   },
 });
@@ -220,15 +262,20 @@ export const starlightLlmsTree = (_options: StarlightLlmsTreeOptions = {}) => ({
     'config:setup': ({
       addIntegration,
       addRouteMiddleware,
+      astroConfig,
     }: {
       addIntegration(integration: AstroIntegration): void;
-      addRouteMiddleware(config: { entrypoint: string; order: 'post' }): void;
+      addRouteMiddleware(config: { entrypoint: string }): void;
+      astroConfig: { base: string };
     }) => {
-      addRouteMiddleware({
-        entrypoint: new URL('./metadata-middleware.js', import.meta.url).pathname,
-        order: 'post',
-      });
-      addIntegration(integration());
+      const owner = acquireMetadataOwner();
+      try {
+        addRouteMiddleware({ entrypoint: new URL('./metadata-middleware.js', import.meta.url).href });
+        addIntegration(integration(astroConfig.base, owner));
+      } catch (error) {
+        releaseMetadataOwner(owner);
+        throw error;
+      }
     },
   },
 });

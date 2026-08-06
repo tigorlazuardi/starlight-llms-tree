@@ -1,19 +1,50 @@
-import { pageTags } from './metadata.js';
+import type { MiddlewareHandler } from 'astro';
+import { routePath } from './route.js';
 
-export const onRequest = async (
-  context: {
-    locals: { starlightRoute?: { id?: string; entry?: { data?: { tags?: unknown } } } };
-  },
-  next: () => Promise<void>,
-) => {
-  const route = context.locals.starlightRoute;
-  const data = route?.entry?.data;
-  if (!data || route.id === undefined) return next();
+const metadataKey = Symbol.for('starlight-llms-tree.frontmatter');
+type Owner = object;
+interface MetadataState {
+  owner: Owner;
+  records: Map<string, Record<string, unknown>>;
+}
 
-  const tags = data.tags ?? [];
-  if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) {
-    throw new Error('Starlight page tags must be an array of strings');
+const state = () =>
+  (globalThis as typeof globalThis & { [metadataKey]?: MetadataState })[metadataKey];
+
+export const acquireMetadataOwner = (): Owner => {
+  const globalState = globalThis as typeof globalThis & { [metadataKey]?: MetadataState };
+  if (globalState[metadataKey]) {
+    throw new Error('starlight-llms-tree does not support concurrent builds in one process');
   }
-  pageTags.set(route.id.normalize('NFC').replace(/(?:^|\/)index$/, ''), tags);
-  await next();
+  const owner = {};
+  globalState[metadataKey] = { owner, records: new Map() };
+  return owner;
+};
+
+export const readMetadata = (owner: Owner) => {
+  const current = state();
+  if (!current || current.owner !== owner) {
+    throw new Error('starlight-llms-tree metadata owner does not match active build');
+  }
+  return current.records;
+};
+
+export const releaseMetadataOwner = (owner: Owner) => {
+  const globalState = globalThis as typeof globalThis & { [metadataKey]?: MetadataState };
+  const current = globalState[metadataKey];
+  if (!current || current.owner !== owner) {
+    throw new Error('starlight-llms-tree cannot release metadata owned by another build');
+  }
+  current.records.clear();
+  delete globalState[metadataKey];
+};
+
+export const onRequest: MiddlewareHandler = (context, next) => {
+  const route = (context.locals as { starlightRoute?: { entry?: { data?: Record<string, unknown> } } })
+    .starlightRoute;
+  const current = state();
+  if (route?.entry?.data && current) {
+    current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), route.entry.data);
+  }
+  return next();
 };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { link, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, link, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -72,21 +72,90 @@ plugin.name satisfies string;
   await put(
     root,
     'src/content.config.ts',
-    `import { defineCollection, z } from 'astro:content';
+    `import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
-export const collections = { docs: defineCollection({ loader: docsLoader({ generateId: ({ entry }) => entry === 'nfd.md' ? 'unicode/e\\u0301' : entry.replace(/\\.mdx?$/, '') }), schema: docsSchema({ extend: z.object({ tags: z.array(z.string()).optional() }) }) }) };
+export const collections = { docs: defineCollection({ loader: docsLoader({ generateId: ({ entry }) => entry === 'nfd.md' ? 'unicode/e\\u0301' : entry.replace(/\\.mdx?$/, '') }), schema: docsSchema({ extend: z.object({ category: z.enum(['guide', 'reference']).optional(), tags: z.array(z.string()).optional() }) }) }) };
 `,
   );
-  const fixturePages = {
-    'index.md': `---
+  await put(
+    root,
+    'src/content/docs/index.mdx',
+    `---
 title: Overview
-description: Fixture docs home.
+description: Rich fixture page
+category: guide
 tags: [product, product/core]
+pagefind: false
+sidebar:
+  order: 2
+  label: Packed overview
 ---
 
+import { Aside, FileTree, TabItem, Tabs } from '@astrojs/starlight/components';
+
 Welcome to the packed consumer. This content must remain readable.
+
+## Install [guide heading](/docs/guide/#start) with \`code\`
+
+- First item
+- Second item
+
+<ol start="3"><li>Third</li><li value="7">Seventh</li><li>Eighth</li></ol>
+
+<ol reversed><li>Third</li><li>Second</li><li>First</li></ol>
+
+<ol reversed start="8"><li>Eighth</li><li value="4">Fourth</li><li>Third</li></ol>
+
+<table><thead><tr><th>Tool</th><th>Ready</th></tr></thead><tbody><tr><td><a href="/docs/guide/#start">Pack</a></td><td>yes</td></tr></tbody></table>
+
+<video controls src="/docs/demo.mp4"><source src="/docs/demo.webm" type="video/webm" />Video fallback</video>
+
+<iframe src="https://example.com/embed" title="Demo"></iframe>
+
+<Aside type="tip" title="Remember">Keep **semantic content**.</Aside>
+
+<Tabs>
+  <TabItem label="npm">\`npm install package\`</TabItem>
+  <TabItem label="pnpm">\`pnpm add package\`</TabItem>
+</Tabs>
+
+<details>
+  <summary>More information</summary>
+
+  Details stay readable.
+</details>
+
+\`\`\`js title="example.js"
+console.log('rich code');
+\`\`\`
+
+<FileTree>
+- src/
+  - index.ts
+- package.json
+</FileTree>
+
+<section class="feature">Useful [guide link](/docs/guide/?view=full#start), [download](/docs/download), [feed](/docs/feed/), [report](/docs/report.html?raw=1#top), <kbd>Ctrl</kbd>, [fragment](#install), [external](https://example.com/docs), and [asset](/docs/logo.svg).</section>
+
+{/* converter must remove this comment */}
 `,
+  );
+  await put(
+    root,
+    'src/content/docs/guide.md',
+    `---
+title: Guide
+category: reference
+description: Direct guide.
+tags: [guide]
+---
+
+# Start
+`,
+  );
+  const extraPages = {
     'changelog.md': `---
 title: Changelog
 description: Product changes.
@@ -94,11 +163,6 @@ tags: [releases/history]
 ---
 
 Release notes.
-`,
-    'empty.md': `---
-title: Empty
-tags: [empty]
----
 `,
     'nfd.md': `---
 title: NFD route
@@ -174,9 +238,13 @@ tags: [éclair/child]
 Éclair child.
 `,
   };
-  for (const [name, content] of Object.entries(fixturePages)) {
+  for (const [name, content] of Object.entries(extraPages)) {
     await put(root, `src/content/docs/${name}`, content);
   }
+  await put(root, 'src/pages/download.astro', '<h1>Download endpoint</h1>\n');
+  await put(root, 'public/feed/index.html', '<p>Feed endpoint</p>\n');
+  await put(root, 'public/report.html', '<p>Raw report</p>\n');
+  await put(root, 'public/logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>\n');
 
   await exec('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
     cwd: root,
@@ -241,36 +309,37 @@ tags: [éclair/child]
 
   const llms = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const markdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
+  const guideMarkdown = await readFile(path.join(root, 'dist/guide.md'), 'utf8');
   assert.equal(
     llms,
     `# Overview
 
-> Fixture docs home.
+> Rich fixture page
 
 ## Pages
 
-- [Overview](/index.md): Fixture docs home.
+- [Overview](/docs/index.md): Rich fixture page
   - Tags: \`product\`, \`product/core\`
-- [Changelog](/changelog.md): Product changes.
+- [Changelog](/docs/changelog.md): Product changes.
   - Tags: \`releases/history\`
-- [Empty](/empty.md)
-  - Tags: \`empty\`
-- [Zulu](/zulu.md)
+- [Guide](/docs/guide.md): Direct guide.
+  - Tags: \`guide\`
+- [Zulu](/docs/zulu.md)
   - Tags: \`plain\`
-- [Éclair](/eclair.md)
+- [Éclair](/docs/eclair.md)
   - Tags: \`accent/topic\`
 
 ## Folders
 
-- [Guides](/guides/llms.txt): Build fixture apps.
+- [Guides](/docs/guides/llms.txt): Build fixture apps.
   - Scopes: \`guide\`, \`setup\`
-- [Reference](/reference/llms.txt)
+- [Reference](/docs/reference/llms.txt)
   - Scopes: \`api\`
-- [Unicode](/unicode/llms.txt)
+- [Unicode](/docs/unicode/llms.txt)
   - Scopes: \`unicode\`
-- [Zulu folder](/zulu-folder/llms.txt)
+- [Zulu folder](/docs/zulu-folder/llms.txt)
   - Scopes: \`zulu\`
-- [Éclair folder](/eclair-folder/llms.txt)
+- [Éclair folder](/docs/eclair-folder/llms.txt)
   - Scopes: \`éclair\`
 `,
   );
@@ -282,9 +351,9 @@ tags: [éclair/child]
 
 ## Pages
 
-- [Overview](/guides.md): Build fixture apps.
+- [Overview](/docs/guides.md): Build fixture apps.
   - Tags: \`guide\`, \`setup/basics\`
-- [Install](/guides/install.md): Install fixture apps.
+- [Install](/docs/guides/install.md): Install fixture apps.
   - Tags: \`setup/linux\`, \`setup/mac\`
 `,
   );
@@ -294,7 +363,7 @@ tags: [éclair/child]
 
 ## Folders
 
-- [Api](/reference/api/llms.txt)
+- [Api](/docs/reference/api/llms.txt)
   - Scopes: \`api\`
 `,
   );
@@ -304,7 +373,7 @@ tags: [éclair/child]
 
 ## Pages
 
-- [Endpoints](/reference/api/endpoints.md): HTTP endpoint reference.
+- [Endpoints](/docs/reference/api/endpoints.md): HTTP endpoint reference.
   - Tags: \`api/http\`
 `,
   );
@@ -314,7 +383,7 @@ tags: [éclair/child]
 
 ## Pages
 
-- [NFD route](/unicode/é.md)
+- [NFD route](/docs/unicode/é.md)
   - Tags: \`unicode/survive\`
 `,
   );
@@ -328,8 +397,91 @@ tags: [éclair/child]
     ['Éclair folder', 'Zulu folder'],
   );
   assert.ok(llms.indexOf('[Zulu folder]') < llms.indexOf('[Éclair folder]'));
-  assert.match(markdown, /^# Overview/m);
+  assert.match(guideMarkdown, /^---[\s\S]*"title": "Guide"[\s\S]*---\n\n# Guide/);
+  const frontmatterMatch = markdown.match(/^---\n([\s\S]*?)\n---\n\n# Overview/);
+  assert.ok(frontmatterMatch);
+  const frontmatter = JSON.parse(frontmatterMatch[1]);
+  assert.equal(frontmatter.title, 'Overview');
+  assert.equal(frontmatter.description, 'Rich fixture page');
+  assert.equal(frontmatter.category, 'guide');
+  assert.equal(frontmatter.pagefind, false);
+  assert.equal(frontmatter.template, 'doc');
+  assert.equal(frontmatter.editUrl, true);
+  assert.equal(frontmatter.sidebar.order, 2);
+  assert.equal(frontmatter.sidebar.label, 'Packed overview');
+  assert.equal(frontmatter.sidebar.hidden, false);
   assert.match(markdown, /Welcome to the packed consumer\. This content must remain readable\./);
+  assert.match(markdown, /## Install \[guide heading\]\(\/docs\/guide\.md#start\) with `code`/);
+  assert.match(markdown, /- First item\n- Second item/);
+  assert.match(markdown, /3\. Third\n7\. Seventh\n8\. Eighth/);
+  assert.match(markdown, /3\. Third\n2\. Second\n1\. First/);
+  assert.match(markdown, /8\. Eighth\n4\. Fourth\n3\. Third/);
+  assert.match(markdown, /<table><thead><tr><th>Tool<\/th><th>Ready<\/th><\/tr><\/thead><tbody><tr><td><a href="\/docs\/guide\.md#start">Pack<\/a><\/td><td>yes<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /<video controls="" src="\/docs\/demo\.mp4"><source src="\/docs\/demo\.webm" type="video\/webm">Video fallback<\/video>/);
+  assert.match(markdown, /<iframe src="https:\/\/example\.com\/embed" title="Demo"><\/iframe>/);
+  assert.match(markdown, /> \[!TIP\]\n> \*\*Remember\*\*\n> Keep \*\*semantic content\*\*\./);
+  assert.match(markdown, /### npm\n\n`npm install package`/);
+  assert.match(markdown, /### pnpm\n\n`pnpm add package`/);
+  assert.match(markdown, /<details>[\s\S]*<summary>More information<\/summary>[\s\S]*Details stay readable\.[\s\S]*<\/details>/);
+  assert.match(markdown, /```js\nconsole\.log\('rich code'\);\n```/);
+  assert.match(markdown, /<summary>src\/<\/summary>[\s\S]*- index\.ts[\s\S]*- package\.json/);
+  assert.match(markdown, /\[guide link\]\(\/docs\/guide\.md\?view=full#start\)/);
+  assert.match(markdown, /\[download\]\(\/docs\/download\)/);
+  assert.match(markdown, /\[feed\]\(\/docs\/feed\/\)/);
+  assert.match(markdown, /\[report\]\(\/docs\/report\.html\?raw=1#top\)/);
+  assert.match(markdown, /<kbd>Ctrl<\/kbd>/);
+  assert.match(markdown, /\[fragment\]\(#install\)/);
+  assert.match(markdown, /\[external\]\(https:\/\/example\.com\/docs\)/);
+  assert.match(markdown, /\[asset\]\(\/docs\/logo\.svg\)/);
+  assert.doesNotMatch(markdown, /converter must remove this comment|tablist-wrapper|starlight-aside__title/);
+
+  const generatedMarkdown = (await readdir(path.join(root, 'dist'), { recursive: true }))
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => path.join(root, 'dist', name));
+  assert.deepEqual(
+    generatedMarkdown.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
+    [
+      '404.md',
+      'changelog.md',
+      'eclair-folder.md',
+      'eclair-folder/child.md',
+      'eclair.md',
+      'guide.md',
+      'guides.md',
+      'guides/install.md',
+      'index.md',
+      'reference/api/endpoints.md',
+      'unicode/é.md',
+      'zulu-folder.md',
+      'zulu-folder/child.md',
+      'zulu.md',
+    ],
+  );
+  const generatedIndexes = (await readdir(path.join(root, 'dist'), { recursive: true }))
+    .filter((name) => name.endsWith('llms.txt'))
+    .map((name) => path.join(root, 'dist', name));
+  assert.deepEqual(
+    generatedIndexes.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
+    [
+      'eclair-folder/llms.txt',
+      'guides/llms.txt',
+      'llms.txt',
+      'reference/api/llms.txt',
+      'reference/llms.txt',
+      'unicode/llms.txt',
+      'zulu-folder/llms.txt',
+    ],
+  );
+  for (const source of [...generatedIndexes, ...generatedMarkdown]) {
+    const content = await readFile(source, 'utf8');
+    for (const match of content.matchAll(/\]\(([^)?#]+(?:\.md|llms\.txt))(?:[?#][^)]*)?\)/g)) {
+      const target = match[1].startsWith('/docs/')
+        ? path.join(root, 'dist', match[1].slice('/docs/'.length))
+        : path.resolve(path.dirname(source), match[1]);
+      assert.ok(target.startsWith(path.join(root, 'dist') + path.sep));
+      await access(target);
+    }
+  }
 
   await put(root, 'public/index.md', 'existing file must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*index\.md/);
@@ -340,6 +492,8 @@ tags: [éclair/child]
   await put(root, 'public/llms.txt/marker', 'existing directory must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*llms\.txt/);
   await assert.rejects(readFile(path.join(root, 'dist/index.md')), { code: 'ENOENT' });
+  await assert.rejects(readFile(path.join(root, 'dist/guide.md')), { code: 'ENOENT' });
+  await assert.rejects(readFile(path.join(root, 'dist/404.md')), { code: 'ENOENT' });
   assert.equal(
     await readFile(path.join(root, 'dist/llms.txt/marker'), 'utf8'),
     'existing directory must survive\n',
@@ -347,8 +501,8 @@ tags: [éclair/child]
 
   await rm(path.join(root, 'public/llms.txt'), { recursive: true });
   await rename(
-    path.join(root, 'src/content/docs/index.md'),
-    path.join(root, 'src/content/docs/guide.md'),
+    path.join(root, 'src/content/docs/index.mdx'),
+    path.join(root, 'src/content/docs/renamed-root.mdx'),
   );
   await failedBuild(root, /requires a root Starlight page/);
 });
