@@ -1,3 +1,5 @@
+import { posix } from 'node:path';
+
 interface ElementNode {
   type: 'element';
   tag: string;
@@ -56,7 +58,7 @@ const parseAttributes = (source: string) => {
   return attributes;
 };
 
-// ponytail: rendered Astro HTML needs quote-aware tags, not HTML5 error recovery; use a parser if malformed input becomes supported.
+// ponytail: rendered Astro HTML needs quote-aware tags and valid raw text, not HTML5 error recovery; use a parser if malformed input becomes supported.
 const tokenizeHtml = (html: string) => {
   const tokens: string[] = [];
   let start = 0;
@@ -86,8 +88,22 @@ const tokenizeHtml = (html: string) => {
       tokens.push(html.slice(opening));
       break;
     }
-    tokens.push(html.slice(opening, end + 1));
+    const tagToken = html.slice(opening, end + 1);
+    tokens.push(tagToken);
     start = end + 1;
+
+    const rawTextTag = tagToken.match(/^<(script|style)(?:\s|>)/i)?.[1];
+    if (rawTextTag) {
+      const closingTag = new RegExp(`</${rawTextTag}\\s*>`, 'gi');
+      closingTag.lastIndex = start;
+      const match = closingTag.exec(html);
+      if (!match) {
+        tokens.push(html.slice(start));
+        break;
+      }
+      tokens.push(html.slice(start, match.index), match[0]);
+      start = closingTag.lastIndex;
+    }
   }
   return tokens;
 };
@@ -140,22 +156,35 @@ const plainText = (node: HtmlNode): string =>
 
 const cleanText = (node: HtmlNode) => plainText(node).replace(/\s+/g, ' ').trim();
 
-const rewriteDocsLink = (href: string) => {
-  if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(href)) return href;
-  const match = href.match(/^([^?#]*)([?#].*)?$/);
-  if (!match || !match[1]) return href;
-  let pathname = match[1];
-  if (/\.[^/]+$/.test(pathname) && !/\.html$/i.test(pathname)) return href;
-  pathname = pathname.replace(/(^|\/)index\.html$/i, '$1');
-  const markdownPath =
-    pathname === '/'
-      ? '/index.md'
-      : pathname === ''
-        ? 'index.md'
-        : pathname === './'
-          ? './index.md'
-          : `${pathname.replace(/(?:\.html|\/$)/i, '')}.md`;
-  return `${markdownPath}${match[2] ?? ''}`;
+const routePath = (pathname: string) => {
+  const normalized = `/${pathname.replace(/^\/+|\/+$/g, '')}`;
+  return normalized === '/' ? '/' : `${normalized}/`;
+};
+
+const rewriteDocsLink = (
+  href: string,
+  pagePathname: string,
+  generatedDocs: ReadonlyMap<string, string>,
+) => {
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#|\?)/i.test(href)) return href;
+  let resolved: URL;
+  try {
+    resolved = new URL(href, `https://generated.invalid${routePath(pagePathname)}`);
+  } catch {
+    return href;
+  }
+  const resolvedPath = resolved.pathname
+    .replace(/(?:^|\/)index\.html$/i, (value) => value.slice(0, -10))
+    .replace(/\.html$/i, '');
+  const target = generatedDocs.get(routePath(resolvedPath));
+  const source = generatedDocs.get(routePath(pagePathname));
+  if (!target || !source) return href;
+
+  const sourcePath = href.match(/^[^?#]*/)?.[0] ?? '';
+  const suffix = href.slice(sourcePath.length);
+  if (sourcePath.startsWith('/')) return `${target}${suffix}`;
+  const relative = posix.relative(posix.dirname(source), target);
+  return `${sourcePath.startsWith('./') && !relative.startsWith('.') ? './' : ''}${relative}${suffix}`;
 };
 
 const normalizeBlocks = (value: string) =>
@@ -180,7 +209,11 @@ const codeDelimiter = (value: string, minimum: number) => {
   return '`'.repeat(Math.max(minimum, longest + 1));
 };
 
-const renderMarkdown = (content: ElementNode) => {
+const renderMarkdown = (
+  content: ElementNode,
+  pagePathname: string,
+  generatedDocs: ReadonlyMap<string, string>,
+) => {
   const ids = new Map<string, string>();
   const collectIds = (node: ElementNode) => {
     if (node.attributes.id) ids.set(node.attributes.id, cleanText(node));
@@ -190,11 +223,19 @@ const renderMarkdown = (content: ElementNode) => {
 
   const renderChildren = (node: ElementNode) => node.children.map(render).join('');
   const renderList = (node: ElementNode, ordered: boolean) => {
-    let index = 0;
-    return `${node.children
-      .filter((child): child is ElementNode => child.type === 'element' && child.tag === 'li')
+    const items = node.children.filter(
+      (child): child is ElementNode => child.type === 'element' && child.tag === 'li',
+    );
+    const reversed = ordered && 'reversed' in node.attributes;
+    let index =
+      ordered && /^-?\d+$/.test(node.attributes.start ?? '')
+        ? Number(node.attributes.start)
+        : reversed
+          ? items.length
+          : 1;
+    return `${items
       .map((child) => {
-        index += 1;
+        if (ordered && /^-?\d+$/.test(child.attributes.value ?? '')) index = Number(child.attributes.value);
         const value = normalizeBlocks(
           child.children
             .map((item) =>
@@ -204,15 +245,29 @@ const renderMarkdown = (content: ElementNode) => {
         );
         const lines = value.split('\n');
         const marker = ordered ? `${index}. ` : '- ';
+        index += reversed ? -1 : 1;
         return `${marker}${lines.join(`\n${' '.repeat(marker.length)}`)}`;
       })
       .join('\n')}\n\n`;
   };
-  const renderRaw = (node: ElementNode) => {
+  const renderRaw = (node: ElementNode): string => {
+    if (['script', 'style', 'svg', 'template'].includes(node.tag)) return '';
     const attributes = Object.entries(node.attributes)
       .map(([name, value]) => ` ${name}="${escapeHtmlAttribute(value)}"`)
       .join('');
-    return `<${node.tag}${attributes}>${renderChildren(node)}</${node.tag}>`;
+    const children = node.children
+      .map((child) =>
+        child.type === 'text'
+          ? decodeEntities(child.value)
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+          : renderRaw(child),
+      )
+      .join('');
+    return voidElements.has(node.tag)
+      ? `<${node.tag}${attributes}>`
+      : `<${node.tag}${attributes}>${children}</${node.tag}>`;
   };
   const render = (node: HtmlNode): string => {
     if (node.type === 'text') return escapeGfmText(node.value);
@@ -235,7 +290,11 @@ const renderMarkdown = (content: ElementNode) => {
     if (node.tag === 'hr') return '\n---\n\n';
     if (node.tag === 'a') {
       if (node.attributes['aria-label']?.startsWith('Section titled')) return '';
-      return `[${normalizeBlocks(renderChildren(node))}](${rewriteDocsLink(node.attributes.href ?? '')})`;
+      return `[${normalizeBlocks(renderChildren(node))}](${rewriteDocsLink(
+        node.attributes.href ?? '',
+        pagePathname,
+        generatedDocs,
+      )})`;
     }
     if (node.tag === 'img') return `![${escapeGfmText(node.attributes.alt ?? '')}](${node.attributes.src ?? ''})`;
     if (node.tag === 'strong' || node.tag === 'b') return `**${renderChildren(node)}**`;
@@ -264,11 +323,16 @@ const renderMarkdown = (content: ElementNode) => {
     }
     if (node.tag === 'aside' && hasClass(node, 'starlight-aside')) {
       const type = node.attributes.class.match(/starlight-aside--([\w-]+)/)?.[1]?.toUpperCase() ?? 'NOTE';
+      const title = node.children.find(
+        (child): child is ElementNode => child.type === 'element' && hasClass(child, 'starlight-aside__title'),
+      );
       const body = node.children.find(
         (child): child is ElementNode => child.type === 'element' && hasClass(child, 'starlight-aside__content'),
       );
       const value = normalizeBlocks(body ? renderChildren(body) : renderChildren(node));
-      return `> [!${type}]\n${value.split('\n').map((line) => `> ${line}`).join('\n')}\n\n`;
+      const renderedTitle = title && cleanText(title);
+      const titleLine = renderedTitle ? `\n> **${escapeGfmText(renderedTitle)}**` : '';
+      return `> [!${type}]${titleLine}\n${value.split('\n').map((line) => `> ${line}`).join('\n')}\n\n`;
     }
     if (node.tag === 'details') {
       const summary = node.children.find(
@@ -280,6 +344,7 @@ const renderMarkdown = (content: ElementNode) => {
     }
     if (node.tag === 'summary') return '';
     if (['kbd', 'mark', 'sub', 'sup', 'abbr'].includes(node.tag)) return renderRaw(node);
+    if (node.tag === 'table') return `${renderRaw(node)}\n\n`;
     if (['figure', 'figcaption'].includes(node.tag)) return `${renderChildren(node)}\n\n`;
     return renderChildren(node);
   };
@@ -287,17 +352,16 @@ const renderMarkdown = (content: ElementNode) => {
   return normalizeBlocks(renderChildren(content));
 };
 
-export const normalizeStarlightPage = (html: string) => {
+export const normalizeStarlightPage = (
+  html: string,
+  frontmatter: Record<string, unknown>,
+  generatedDocs: ReadonlyMap<string, string>,
+  pagePathname = '/',
+) => {
   const root = parseHtml(html);
   const content = findElement(root, (node) => hasClass(node, 'sl-markdown-content'));
   if (!content) throw new Error('Starlight page has no .sl-markdown-content element');
-  const heading = findElement(root, (node) => node.tag === 'h1');
-  const title = heading && cleanText(heading);
-  if (!title) throw new Error('Root Starlight page has no h1 title');
-  const description = findElement(
-    root,
-    (node) => node.tag === 'meta' && node.attributes.name === 'description',
-  )?.attributes.content;
-  const frontmatter = description ? { title, description } : { title };
-  return `---\n${JSON.stringify(frontmatter, null, 2)}\n---\n\n# ${escapeGfmText(title)}\n\n${renderMarkdown(content)}\n`;
+  const title = typeof frontmatter.title === 'string' && frontmatter.title.trim();
+  if (!title) throw new Error('Normalized Starlight collection frontmatter has no title');
+  return `---\n${JSON.stringify(frontmatter, null, 2)}\n---\n\n# ${escapeGfmText(title)}\n\n${renderMarkdown(content, pagePathname, generatedDocs)}\n`;
 };

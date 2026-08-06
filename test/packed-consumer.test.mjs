@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { link, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, link, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -51,7 +51,7 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
     `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { starlightLlmsTree } from 'starlight-llms-tree';
-export default defineConfig({ integrations: [starlight({ title: 'Fixture docs', plugins: [starlightLlmsTree()] })] });
+export default defineConfig({ base: '/docs', integrations: [starlight({ title: 'Fixture docs', plugins: [starlightLlmsTree()] })] });
 `,
   );
   await put(
@@ -73,9 +73,10 @@ plugin.name satisfies string;
     root,
     'src/content.config.ts',
     `import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
-export const collections = { docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }) };
+export const collections = { docs: defineCollection({ loader: docsLoader(), schema: docsSchema({ extend: z.object({ category: z.enum(['guide', 'reference']) }) }) }) };
 `,
   );
   await put(
@@ -84,6 +85,11 @@ export const collections = { docs: defineCollection({ loader: docsLoader(), sche
     `---
 title: Overview
 description: Rich fixture page
+category: guide
+pagefind: false
+sidebar:
+  order: 2
+  label: Packed overview
 ---
 
 import { Aside, FileTree, TabItem, Tabs } from '@astrojs/starlight/components';
@@ -94,6 +100,14 @@ Welcome to the packed consumer. This content must remain readable.
 
 - First item
 - Second item
+
+<ol start="3"><li>Third</li><li value="7">Seventh</li><li>Eighth</li></ol>
+
+<ol reversed><li>Third</li><li>Second</li><li>First</li></ol>
+
+<ol reversed start="8"><li>Eighth</li><li value="4">Fourth</li><li>Third</li></ol>
+
+<table><thead><tr><th>Tool</th><th>Ready</th></tr></thead><tbody><tr><td>Pack</td><td>yes</td></tr></tbody></table>
 
 <Aside type="tip" title="Remember">Keep **semantic content**.</Aside>
 
@@ -118,7 +132,7 @@ console.log('rich code');
 - package.json
 </FileTree>
 
-<section class="feature">Useful [guide link](/guide/#start) with <kbd>Ctrl</kbd>, [fragment](#install), [external](https://example.com/docs), and [asset](/logo.svg).</section>
+<section class="feature">Useful [guide link](/docs/guide/?view=full#start), [download](/docs/download), [feed](/docs/feed/), [report](/docs/report.html?raw=1#top), <kbd>Ctrl</kbd>, [fragment](#install), [external](https://example.com/docs), and [asset](/docs/logo.svg).</section>
 
 {/* converter must remove this comment */}
 `,
@@ -128,11 +142,15 @@ console.log('rich code');
     'src/content/docs/guide.md',
     `---
 title: Guide
+category: reference
 ---
 
 # Start
 `,
   );
+  await put(root, 'src/pages/download.astro', '<h1>Download endpoint</h1>\n');
+  await put(root, 'public/feed/index.html', '<p>Feed endpoint</p>\n');
+  await put(root, 'public/report.html', '<p>Raw report</p>\n');
   await put(root, 'public/logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>\n');
 
   await exec('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
@@ -198,26 +216,62 @@ title: Guide
 
   const llms = await readFile(path.join(root, 'dist/llms.txt'), 'utf8');
   const markdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
+  const guideMarkdown = await readFile(path.join(root, 'dist/guide.md'), 'utf8');
   assert.match(llms, /\[Overview\]\(\.\/index\.md\)/);
-  assert.match(
-    markdown,
-    /^---\n\{\n  "title": "Overview",\n  "description": "Rich fixture page"\n\}\n---\n\n# Overview/,
-  );
+  assert.match(llms, /\[Guide\]\(\.\/guide\.md\)/);
+  assert.match(guideMarkdown, /^---[\s\S]*"title": "Guide"[\s\S]*---\n\n# Guide/);
+  const frontmatterMatch = markdown.match(/^---\n([\s\S]*?)\n---\n\n# Overview/);
+  assert.ok(frontmatterMatch);
+  const frontmatter = JSON.parse(frontmatterMatch[1]);
+  assert.equal(frontmatter.title, 'Overview');
+  assert.equal(frontmatter.description, 'Rich fixture page');
+  assert.equal(frontmatter.category, 'guide');
+  assert.equal(frontmatter.pagefind, false);
+  assert.equal(frontmatter.template, 'doc');
+  assert.equal(frontmatter.editUrl, true);
+  assert.equal(frontmatter.sidebar.order, 2);
+  assert.equal(frontmatter.sidebar.label, 'Packed overview');
+  assert.equal(frontmatter.sidebar.hidden, false);
   assert.match(markdown, /Welcome to the packed consumer\. This content must remain readable\./);
   assert.match(markdown, /## Install/);
   assert.match(markdown, /- First item\n- Second item/);
-  assert.match(markdown, /> \[!TIP\]\n> Keep \*\*semantic content\*\*\./);
+  assert.match(markdown, /3\. Third\n7\. Seventh\n8\. Eighth/);
+  assert.match(markdown, /3\. Third\n2\. Second\n1\. First/);
+  assert.match(markdown, /8\. Eighth\n4\. Fourth\n3\. Third/);
+  assert.match(markdown, /<table><thead><tr><th>Tool<\/th><th>Ready<\/th><\/tr><\/thead><tbody><tr><td>Pack<\/td><td>yes<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /> \[!TIP\]\n> \*\*Remember\*\*\n> Keep \*\*semantic content\*\*\./);
   assert.match(markdown, /### npm\n\n`npm install package`/);
   assert.match(markdown, /### pnpm\n\n`pnpm add package`/);
   assert.match(markdown, /<details>[\s\S]*<summary>More information<\/summary>[\s\S]*Details stay readable\.[\s\S]*<\/details>/);
   assert.match(markdown, /```js\nconsole\.log\('rich code'\);\n```/);
   assert.match(markdown, /<summary>src\/<\/summary>[\s\S]*- index\.ts[\s\S]*- package\.json/);
-  assert.match(markdown, /\[guide link\]\(\/guide\.md#start\)/);
+  assert.match(markdown, /\[guide link\]\(\/docs\/guide\.md\?view=full#start\)/);
+  assert.match(markdown, /\[download\]\(\/docs\/download\)/);
+  assert.match(markdown, /\[feed\]\(\/docs\/feed\/\)/);
+  assert.match(markdown, /\[report\]\(\/docs\/report\.html\?raw=1#top\)/);
   assert.match(markdown, /<kbd>Ctrl<\/kbd>/);
   assert.match(markdown, /\[fragment\]\(#install\)/);
   assert.match(markdown, /\[external\]\(https:\/\/example\.com\/docs\)/);
-  assert.match(markdown, /\[asset\]\(\/logo\.svg\)/);
+  assert.match(markdown, /\[asset\]\(\/docs\/logo\.svg\)/);
   assert.doesNotMatch(markdown, /converter must remove this comment|tablist-wrapper|starlight-aside__title/);
+
+  const generatedMarkdown = (await readdir(path.join(root, 'dist'), { recursive: true }))
+    .filter((name) => name.endsWith('.md'))
+    .map((name) => path.join(root, 'dist', name));
+  assert.deepEqual(
+    generatedMarkdown.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
+    ['404.md', 'guide.md', 'index.md'],
+  );
+  for (const source of [path.join(root, 'dist/llms.txt'), ...generatedMarkdown]) {
+    const content = await readFile(source, 'utf8');
+    for (const match of content.matchAll(/\]\(([^)]+\.md)(?:[?#][^)]*)?\)/g)) {
+      const target = match[1].startsWith('/docs/')
+        ? path.join(root, 'dist', match[1].slice('/docs/'.length))
+        : path.resolve(path.dirname(source), match[1]);
+      assert.ok(target.startsWith(path.join(root, 'dist') + path.sep));
+      await access(target);
+    }
+  }
 
   await put(root, 'public/index.md', 'existing file must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*index\.md/);
@@ -228,6 +282,8 @@ title: Guide
   await put(root, 'public/llms.txt/marker', 'existing directory must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*llms\.txt/);
   await assert.rejects(readFile(path.join(root, 'dist/index.md')), { code: 'ENOENT' });
+  await assert.rejects(readFile(path.join(root, 'dist/guide.md')), { code: 'ENOENT' });
+  await assert.rejects(readFile(path.join(root, 'dist/404.md')), { code: 'ENOENT' });
   assert.equal(
     await readFile(path.join(root, 'dist/llms.txt/marker'), 'utf8'),
     'existing directory must survive\n',
