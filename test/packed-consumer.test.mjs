@@ -404,6 +404,7 @@ tags: [éclair/child]
   assert.equal(frontmatter.title, 'Overview');
   assert.equal(frontmatter.description, 'Rich fixture page');
   assert.equal(frontmatter.category, 'guide');
+  assert.deepEqual(frontmatter.tags, ['product', 'product/core']);
   assert.equal(frontmatter.pagefind, false);
   assert.equal(frontmatter.template, 'doc');
   assert.equal(frontmatter.editUrl, true);
