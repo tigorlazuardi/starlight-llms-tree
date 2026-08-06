@@ -24,14 +24,14 @@ test('concurrent build ownership fails closed without leaking pathname metadata'
   try {
     await onRequest(
       {
-        locals: { starlightRoute: { entry: { data: { title: 'First build' } } } },
+        locals: { starlightRoute: { entry: { collection: 'docs', data: { title: 'First build' } } } },
         url: new URL('https://example.test/docs/'),
       },
       async () => new Response(),
     );
     await onRequest(
       {
-        locals: { starlightRoute: { entry: { data: { title: 'Unicode page', tags: ['unicode'] } } } },
+        locals: { starlightRoute: { entry: { collection: 'docs', data: { title: 'Unicode page', tags: ['unicode'] } } } },
         url: new URL('https://example.test/docs/unicode/e%CC%81/'),
       },
       async () => new Response(),
@@ -48,7 +48,7 @@ test('concurrent build ownership fails closed without leaking pathname metadata'
   try {
     await onRequest(
       {
-        locals: { starlightRoute: { entry: { data: { title: 'Second build' } } } },
+        locals: { starlightRoute: { entry: { collection: 'docs', data: { title: 'Second build' } } } },
         url: new URL('https://example.test/docs/'),
       },
       async () => new Response(),

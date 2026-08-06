@@ -3,10 +3,25 @@ import { routePath } from './route.js';
 
 const metadataKey = Symbol.for('starlight-llms-tree.frontmatter');
 type Owner = object;
+interface MetadataRecord extends Record<string, unknown> {
+  navigation: string[];
+}
 interface MetadataState {
   owner: Owner;
-  records: Map<string, Record<string, unknown>>;
+  records: Map<string, MetadataRecord>;
 }
+
+const navigationHrefs = (entries: unknown): string[] =>
+  Array.isArray(entries)
+    ? entries.flatMap((entry) => {
+        if (!entry || typeof entry !== 'object') return [];
+        const sidebarEntry = entry as { entries?: unknown; href?: unknown; type?: unknown };
+        if (sidebarEntry.type === 'link' && typeof sidebarEntry.href === 'string') {
+          return [sidebarEntry.href];
+        }
+        return navigationHrefs(sidebarEntry.entries);
+      })
+    : [];
 
 const state = () =>
   (globalThis as typeof globalThis & { [metadataKey]?: MetadataState })[metadataKey];
@@ -40,11 +55,20 @@ export const releaseMetadataOwner = (owner: Owner) => {
 };
 
 export const onRequest: MiddlewareHandler = (context, next) => {
-  const route = (context.locals as { starlightRoute?: { entry?: { data?: Record<string, unknown> } } })
-    .starlightRoute;
+  const route = (
+    context.locals as {
+      starlightRoute?: {
+        entry?: { collection?: unknown; data?: Record<string, unknown> };
+        sidebar?: unknown;
+      };
+    }
+  ).starlightRoute;
   const current = state();
-  if (route?.entry?.data && current) {
-    current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), route.entry.data);
+  if (route?.entry?.collection === 'docs' && route.entry.data && current) {
+    current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), {
+      ...route.entry.data,
+      navigation: navigationHrefs(route.sidebar),
+    });
   }
   return next();
 };

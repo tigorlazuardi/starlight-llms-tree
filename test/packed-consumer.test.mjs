@@ -51,7 +51,20 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
     `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { starlightLlmsTree } from 'starlight-llms-tree';
-export default defineConfig({ base: '/docs', integrations: [starlight({ title: 'Fixture docs', plugins: [starlightLlmsTree()] })] });
+export default defineConfig({
+  base: '/docs',
+  redirects: { '/legacy': '/docs/guide/' },
+  integrations: [starlight({
+    title: 'Fixture docs',
+    sidebar: [
+      { slug: 'guide' },
+      { slug: 'eclair' },
+      { label: 'Guides', items: [{ slug: 'guides/install' }, { slug: 'guide' }] },
+      { label: 'Reference', items: [{ slug: 'reference/api/endpoints' }] },
+    ],
+    plugins: [starlightLlmsTree()],
+  })],
+});
 `,
   );
   await put(
@@ -156,6 +169,13 @@ tags: [guide]
 `,
   );
   const extraPages = {
+    'draft.md': `---
+title: Draft
+draft: true
+---
+
+This draft must not build.
+`,
     'changelog.md': `---
 title: Changelog
 description: Product changes.
@@ -320,14 +340,14 @@ tags: [éclair/child]
 
 - [Overview](/docs/index.md): Rich fixture page
   - Tags: \`product\`, \`product/core\`
-- [Changelog](/docs/changelog.md): Product changes.
-  - Tags: \`releases/history\`
 - [Guide](/docs/guide.md): Direct guide.
   - Tags: \`guide\`
-- [Zulu](/docs/zulu.md)
-  - Tags: \`plain\`
 - [Éclair](/docs/eclair.md)
   - Tags: \`accent/topic\`
+- [Changelog](/docs/changelog.md): Product changes.
+  - Tags: \`releases/history\`
+- [Zulu](/docs/zulu.md)
+  - Tags: \`plain\`
 
 ## Folders
 
@@ -335,12 +355,12 @@ tags: [éclair/child]
   - Scopes: \`guide\`, \`setup\`
 - [Reference](/docs/reference/llms.txt)
   - Scopes: \`api\`
+- [Éclair folder](/docs/eclair-folder/llms.txt)
+  - Scopes: \`éclair\`
 - [Unicode](/docs/unicode/llms.txt)
   - Scopes: \`unicode\`
 - [Zulu folder](/docs/zulu-folder/llms.txt)
   - Scopes: \`zulu\`
-- [Éclair folder](/docs/eclair-folder/llms.txt)
-  - Scopes: \`éclair\`
 `,
   );
   assert.equal(
@@ -387,16 +407,13 @@ tags: [éclair/child]
   - Tags: \`unicode/survive\`
 `,
   );
-  assert.deepEqual(
-    ['Zulu', 'Éclair'].toSorted((left, right) => left.localeCompare(right, 'en')),
-    ['Éclair', 'Zulu'],
-  );
-  assert.ok(llms.indexOf('[Zulu]') < llms.indexOf('[Éclair]'));
-  assert.deepEqual(
-    ['Zulu folder', 'Éclair folder'].toSorted((left, right) => left.localeCompare(right, 'en')),
-    ['Éclair folder', 'Zulu folder'],
-  );
-  assert.ok(llms.indexOf('[Zulu folder]') < llms.indexOf('[Éclair folder]'));
+  assert.ok(llms.indexOf('[Guide]') < llms.indexOf('[Éclair]'));
+  assert.ok(llms.indexOf('[Éclair]') < llms.indexOf('[Changelog]'));
+  assert.ok(llms.indexOf('[Changelog]') < llms.indexOf('[Zulu]'));
+  assert.ok(llms.indexOf('[Guides]') < llms.indexOf('[Reference]'));
+  assert.ok(llms.indexOf('[Reference]') < llms.indexOf('[Éclair folder]'));
+  assert.ok(llms.indexOf('[Éclair folder]') < llms.indexOf('[Unicode]'));
+  assert.ok(llms.indexOf('[Unicode]') < llms.indexOf('[Zulu folder]'));
   assert.match(guideMarkdown, /^---[\s\S]*"title": "Guide"[\s\S]*---\n\n# Guide/);
   const frontmatterMatch = markdown.match(/^---\n([\s\S]*?)\n---\n\n# Overview/);
   assert.ok(frontmatterMatch);
@@ -441,7 +458,6 @@ tags: [éclair/child]
   assert.deepEqual(
     generatedMarkdown.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
     [
-      '404.md',
       'changelog.md',
       'eclair-folder.md',
       'eclair-folder/child.md',
@@ -460,6 +476,7 @@ tags: [éclair/child]
   const generatedIndexes = (await readdir(path.join(root, 'dist'), { recursive: true }))
     .filter((name) => name.endsWith('llms.txt'))
     .map((name) => path.join(root, 'dist', name));
+  assert.doesNotMatch(llms, /Draft|404|Download|legacy/);
   assert.deepEqual(
     generatedIndexes.map((name) => path.relative(path.join(root, 'dist'), name)).sort(),
     [

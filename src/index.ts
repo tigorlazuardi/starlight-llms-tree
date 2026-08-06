@@ -14,6 +14,7 @@ export interface StarlightLlmsTreeOptions {}
 
 interface IndexPage {
   route: string;
+  pathname: string;
   title: string;
   description?: string;
   tags: string[];
@@ -33,7 +34,13 @@ const indexPublicPath = (route: string, base: string) =>
 const renderMetadata = (label: 'Tags' | 'Scopes', values: string[]) =>
   values.length > 0 ? `\n  - ${label}: ${values.map((value) => `\`${value}\``).join(', ')}` : '';
 
-const renderIndex = (folder: string, pages: IndexPage[], folders: string[], base: string) => {
+const renderIndex = (
+  folder: string,
+  pages: IndexPage[],
+  folders: string[],
+  base: string,
+  navigationOrder: Map<string, number>,
+) => {
   const overview = pages.find(({ route }) => route === folder);
   const title = overview?.title ?? humanize(folder);
   const folderSet = new Set(folders);
@@ -41,15 +48,13 @@ const renderIndex = (folder: string, pages: IndexPage[], folders: string[], base
     .filter(({ route }) =>
       route === folder ? true : !folderSet.has(route) && parentRoute(route) === folder,
     )
-    .sort((left, right) =>
-      left.route === folder && right.route === folder
-        ? 0
-        : left.route === folder
-          ? -1
-          : right.route === folder
-            ? 1
-            : compare(left.title, right.title),
-    );
+    .sort((left, right) => {
+      if (left.route === folder) return right.route === folder ? 0 : -1;
+      if (right.route === folder) return 1;
+      const leftOrder = navigationOrder.get(left.pathname) ?? Number.MAX_VALUE;
+      const rightOrder = navigationOrder.get(right.pathname) ?? Number.MAX_VALUE;
+      return leftOrder === rightOrder ? compare(left.pathname, right.pathname) : leftOrder - rightOrder;
+    });
   const directFolders = folders
     .filter((route) => route !== folder && parentRoute(route) === folder)
     .map((route) => {
@@ -63,7 +68,18 @@ const renderIndex = (folder: string, pages: IndexPage[], folders: string[], base
       ].sort(compare);
       return { route, title: index?.title ?? humanize(route), description: index?.description, scopes };
     })
-    .sort((left, right) => compare(left.title, right.title));
+    .sort((left, right) => {
+      const order = (route: string) =>
+        pages
+          .filter((page) => page.route === route || page.route.startsWith(`${route}/`))
+          .reduce(
+            (first, page) => Math.min(first, navigationOrder.get(page.pathname) ?? Number.MAX_VALUE),
+            Number.MAX_VALUE,
+          );
+      const leftOrder = order(left.route);
+      const rightOrder = order(right.route);
+      return leftOrder === rightOrder ? compare(left.route, right.route) : leftOrder - rightOrder;
+    });
 
   const sections = [`# ${title}`, ...(overview?.description ? [`> ${overview.description}`] : [])];
   if (directPages.length > 0) {
@@ -124,20 +140,22 @@ const integration = (base: string, owner: object): AstroIntegration => ({
       try {
         const collectionMetadata = readMetadata(owner);
         const docsPages = pages
+          .filter(({ pathname }) => routeFromPathname(pathname) !== '404')
           .flatMap(({ pathname }) => {
             const finalPathname = publicPath(pathname, base);
-            const frontmatter = collectionMetadata.get(finalPathname);
-            return frontmatter
-              ? [
-                  {
-                    pathname,
-                    finalPathname,
-                    frontmatter,
-                    outputUrl: markdownUrl(dir, pathname),
-                    outputPathname: markdownPublicPath(finalPathname, base),
-                  },
-                ]
-              : [];
+            const metadata = collectionMetadata.get(finalPathname);
+            if (!metadata) return [];
+            const { navigation, ...frontmatter } = metadata;
+            return [
+              {
+                pathname,
+                finalPathname,
+                frontmatter,
+                navigation,
+                outputUrl: markdownUrl(dir, pathname),
+                outputPathname: markdownPublicPath(finalPathname, base),
+              },
+            ];
           })
           .sort((left, right) => compare(left.finalPathname, right.finalPathname));
         const rootPathname = publicPath('/', base);
@@ -171,9 +189,7 @@ const integration = (base: string, owner: object): AstroIntegration => ({
             );
           }
         }
-        const indexPages: IndexPage[] = docsPages
-          .filter(({ pathname }) => routeFromPathname(pathname) !== '404')
-          .map((page) => {
+        const indexPages: IndexPage[] = docsPages.map((page) => {
             const tags = page.frontmatter.tags ?? [];
             if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) {
               throw new Error(
@@ -182,6 +198,7 @@ const integration = (base: string, owner: object): AstroIntegration => ({
             }
             return {
               route: routeFromPathname(page.pathname),
+              pathname: page.finalPathname,
               title: page.frontmatter.title as string,
               description:
                 typeof page.frontmatter.description === 'string' && page.frontmatter.description.trim()
@@ -191,6 +208,18 @@ const integration = (base: string, owner: object): AstroIntegration => ({
               outputPathname: page.outputPathname,
             };
           });
+        const navigationOrder = new Map<string, number>();
+        for (const page of docsPages) {
+          const navigation = page.navigation;
+          if (!Array.isArray(navigation)) continue;
+          for (const href of navigation) {
+            if (typeof href !== 'string' || !href.startsWith('/')) continue;
+            const pathname = routePath(decodeURI(new URL(href, 'https://starlight.invalid').pathname));
+            if (generatedDocs.has(pathname) && !navigationOrder.has(pathname)) {
+              navigationOrder.set(pathname, navigationOrder.size);
+            }
+          }
+        }
         const folders = [
           ...new Set([
             '',
@@ -209,7 +238,7 @@ const integration = (base: string, owner: object): AstroIntegration => ({
         const allFolders = [...folderSet].sort(compare);
         const indexArtifacts = allFolders.map((folder) => ({
           url: new URL(indexPath(folder), dir),
-          content: renderIndex(folder, indexPages, allFolders, base),
+          content: renderIndex(folder, indexPages, allFolders, base, navigationOrder),
         }));
         for (const artifact of indexArtifacts) {
           if (outputTargets.has(artifact.url.href)) {
