@@ -14,6 +14,7 @@ export interface StarlightLlmsTreeOptions {}
 
 interface IndexPage {
   route: string;
+  pathname: string;
   locale?: string;
   title: string;
   description?: string;
@@ -62,7 +63,8 @@ const renderIndex = (
   pages: IndexPage[],
   folders: string[],
   base: string,
-  site?: string,
+  site: string | undefined,
+  navigationOrder: Map<string, number>,
 ) => {
   const overview = pages.find(({ route }) => route === folder);
   const title = overview?.title ?? humanize(folder);
@@ -71,15 +73,13 @@ const renderIndex = (
     .filter(({ route }) =>
       route === folder ? true : !folderSet.has(route) && parentRoute(route) === folder,
     )
-    .sort((left, right) =>
-      left.route === folder && right.route === folder
-        ? 0
-        : left.route === folder
-          ? -1
-          : right.route === folder
-            ? 1
-            : compare(left.title, right.title),
-    );
+    .sort((left, right) => {
+      if (left.route === folder) return right.route === folder ? 0 : -1;
+      if (right.route === folder) return 1;
+      const leftOrder = navigationOrder.get(left.pathname) ?? Number.MAX_VALUE;
+      const rightOrder = navigationOrder.get(right.pathname) ?? Number.MAX_VALUE;
+      return leftOrder === rightOrder ? compare(left.pathname, right.pathname) : leftOrder - rightOrder;
+    });
   const directFolders = folders
     .filter((route) => route !== folder && parentRoute(route) === folder)
     .map((route) => {
@@ -93,7 +93,18 @@ const renderIndex = (
       ].sort(compare);
       return { route, title: index?.title ?? humanize(route), description: index?.description, scopes };
     })
-    .sort((left, right) => compare(left.title, right.title));
+    .sort((left, right) => {
+      const order = (route: string) =>
+        pages
+          .filter((page) => page.route === route || page.route.startsWith(`${route}/`))
+          .reduce(
+            (first, page) => Math.min(first, navigationOrder.get(page.pathname) ?? Number.MAX_VALUE),
+            Number.MAX_VALUE,
+          );
+      const leftOrder = order(left.route);
+      const rightOrder = order(right.route);
+      return leftOrder === rightOrder ? compare(left.route, right.route) : leftOrder - rightOrder;
+    });
 
   const sections = [`# ${title}`, ...(overview?.description ? [`> ${overview.description}`] : [])];
   if (directPages.length > 0) {
@@ -161,12 +172,14 @@ const integration = (
                     finalPathname,
                     frontmatter: metadata.frontmatter,
                     locale: metadata.locale,
+                    navigation: metadata.navigation,
                     outputUrl: markdownUrl(dir, route),
                     outputPathname: markdownPublicPath(route, base, site),
                   },
                 ]
               : [];
           })
+          .filter(({ route }) => route !== '404')
           .sort((left, right) => compare(left.finalPathname, right.finalPathname));
         const rootPathname = publicPath('/', base);
         const root = docsPages.find(({ route }) => route === '');
@@ -199,9 +212,7 @@ const integration = (
             );
           }
         }
-        const indexPages: IndexPage[] = docsPages
-          .filter(({ route }) => route !== '404')
-          .map((page) => {
+        const indexPages: IndexPage[] = docsPages.map((page) => {
             const tags = page.frontmatter.tags ?? [];
             if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) {
               throw new Error(
@@ -210,6 +221,7 @@ const integration = (
             }
             return {
               route: page.route,
+              pathname: page.finalPathname,
               locale: page.locale,
               title: page.frontmatter.title as string,
               description:
@@ -220,6 +232,16 @@ const integration = (
               outputPathname: page.outputPathname,
             };
           });
+        const navigationOrder = new Map<string, number>();
+        for (const page of docsPages) {
+          for (const href of page.navigation) {
+            if (typeof href !== 'string' || !href.startsWith('/')) continue;
+            const pathname = routePath(decodeURI(new URL(href, 'https://starlight.invalid').pathname));
+            if (generatedDocs.has(pathname) && !navigationOrder.has(pathname)) {
+              navigationOrder.set(pathname, navigationOrder.size);
+            }
+          }
+        }
         const pagesByLocale = new Map<string | undefined, IndexPage[]>();
         for (const page of indexPages) {
           pagesByLocale.set(page.locale, [...(pagesByLocale.get(page.locale) ?? []), page]);
@@ -245,7 +267,7 @@ const integration = (
           const allFolders = [...folderSet].sort(compare);
           return allFolders.map((folder) => ({
             url: new URL(indexPath(folder), dir),
-            content: renderIndex(folder, localePages, allFolders, base, site),
+            content: renderIndex(folder, localePages, allFolders, base, site, navigationOrder),
           }));
         });
         for (const artifact of indexArtifacts) {
