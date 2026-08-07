@@ -42,5 +42,6 @@ test('packed package builds repository usage site with documented endpoints', as
   assert.match(usageIndex, /\[Output\].*output\.md/);
   assert.match(usagePage, /starlightLlmsTree\(\)/);
   assert.match(configurationPage, /STARLIGHT_LLMS_TREE_DEBUG=1/);
-  assert.match(outputPage, /dist\/reference\/api\/llms\.txt/);
+  assert.match(outputPage, /dist\/reference\/api\.md/);
+  assert.doesNotMatch(outputPage, /dist\/reference\/api\/llms\.txt/);
 });
