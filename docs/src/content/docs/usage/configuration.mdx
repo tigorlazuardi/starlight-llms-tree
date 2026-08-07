@@ -1,0 +1,36 @@
+---
+title: Configuration
+description: Configure normalization fallback and content-free debug diagnostics for starlight-llms-tree.
+---
+
+```js
+plugins: [starlightLlmsTree({ strict: false, rawContent: false, debug: false })]
+```
+
+All options are optional booleans. `strict` and `rawContent` cannot both be `true`.
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `strict` | `false` | Throw on recoverable normalization failure; generated artifacts are not written. |
+| `rawContent` | `false` | Write authored Markdown body instead of normalizing rendered page HTML. |
+| `debug` | `false` | Log route, target, normalization stage, and manifest counts. Logs never include authored page body. |
+
+## Warnings and errors
+
+Default mode warns then uses fallback content when page, asset, component, link, or metadata normalization fails. `strict: true` turns that recoverable failure into build error.
+
+Build also fails before writing generated files when output target is unsafe, collides with another generated file, collides with existing output, or root Starlight page is missing. Fix route or existing output; plugin never overwrites or suffixes output.
+
+## Debug
+
+Enable config diagnostics:
+
+```js
+plugins: [starlightLlmsTree({ debug: true })]
+```
+
+Or enable for one build:
+
+```sh
+STARLIGHT_LLMS_TREE_DEBUG=1 npm run build
+```

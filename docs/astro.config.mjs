@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from 'astro-mermaid';
 import { pluginLineNumbers } from '@expressive-code/plugin-line-numbers';
+import { starlightLlmsTree } from 'starlight-llms-tree';
 
 export default defineConfig({
   site: 'https://tigorlazuardi.github.io',
@@ -19,8 +20,9 @@ export default defineConfig({
       components: {
         PageTitle: './src/components/PageTitle.astro',
       },
-      // ponytail: llms integration waits for this repo's local plugin export.
+      plugins: [starlightLlmsTree()],
       sidebar: [
+        { label: 'Usage', items: [{ autogenerate: { directory: 'usage' } }] },
         { label: 'Design decisions', items: [{ autogenerate: { directory: 'design' } }] },
         { label: 'Reports', collapsed: true, items: [{ autogenerate: { directory: 'reports' } }] },
       ],
