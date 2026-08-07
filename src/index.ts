@@ -6,8 +6,8 @@ import {
   releaseMetadataOwner,
 } from './metadata-middleware.js';
 import { normalizeStarlightPage } from './normalize.js';
-import { publishGeneratedArtifacts } from './publish.js';
-import { routePath } from './route.js';
+import { publishGeneratedArtifacts, validateOutputManifest } from './publish.js';
+import { assertSafeRoute, routePath } from './route.js';
 
 /** Options for the Starlight LLMs Tree plugin. */
 export interface StarlightLlmsTreeOptions {}
@@ -30,6 +30,7 @@ const publicPath = (pathname: string, base: string) => {
   return routePath(`${baseRoute}${route.slice(1)}`);
 };
 const routeFromPathname = (pathname: string, base: string) => {
+  assertSafeRoute(pathname);
   const finalPathname = publicPath(pathname, base);
   const baseRoute = routePath(base);
   const route =
@@ -268,6 +269,7 @@ const integration = (
           return allFolders.map((folder) => ({
             url: new URL(indexPath(folder), dir),
             content: renderIndex(folder, localePages, allFolders, base, site, navigationOrder),
+            sourceRoute: publicPath(`/${folder}`, base),
           }));
         });
         for (const artifact of indexArtifacts) {
@@ -276,6 +278,18 @@ const integration = (
           }
           outputTargets.add(artifact.url.href);
         }
+
+        await validateOutputManifest(
+          [
+            ...docsPages.map((page) => ({
+              url: page.outputUrl,
+              content: '',
+              sourceRoute: page.finalPathname,
+            })),
+            ...indexArtifacts,
+          ],
+          dir,
+        );
 
         const pageArtifacts = await Promise.all(
           docsPages.map(async (page) => {
@@ -291,6 +305,7 @@ const integration = (
             try {
               return {
                 url: page.outputUrl,
+                sourceRoute: page.finalPathname,
                 content: normalizeStarlightPage(
                   html,
                   page.frontmatter,
@@ -306,7 +321,12 @@ const integration = (
             }
           }),
         );
-        await publishGeneratedArtifacts([...pageArtifacts, ...indexArtifacts]);
+        await publishGeneratedArtifacts(
+          [...pageArtifacts, ...indexArtifacts],
+          undefined,
+          undefined,
+          dir,
+        );
       } finally {
         releaseMetadataOwner(owner);
       }
