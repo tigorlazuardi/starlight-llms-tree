@@ -9,6 +9,13 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'starlight-llms-tree',
+      social: [
+        {
+          icon: 'github',
+          label: 'starlight-llms-tree on GitHub',
+          href: 'https://github.com/tigorlazuardi/starlight-llms-tree',
+        },
+      ],
       plugins: [starlightLlmsTree()],
       sidebar: [
         { label: 'Get started', items: [{ label: 'Installation and usage', slug: 'usage' }] },
