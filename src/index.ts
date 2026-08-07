@@ -9,8 +9,15 @@ import { normalizeStarlightPage } from './normalize.js';
 import { publishGeneratedArtifacts } from './publish.js';
 import { routePath } from './route.js';
 
-/** Options for the Starlight LLMs Tree plugin. */
-export interface StarlightLlmsTreeOptions {}
+/** Options controlling normalization fallback and diagnostics. */
+export interface StarlightLlmsTreeOptions {
+  /** Treat recoverable normalization failures as fatal. Defaults to `false`. Cannot be combined with `rawContent`. */
+  strict?: boolean;
+  /** Emit authored page bodies without normalization. Defaults to `false`. Cannot be combined with `strict`. */
+  rawContent?: boolean;
+  /** Emit content-free diagnostic logs. Defaults to `false`; also enabled by `STARLIGHT_LLMS_TREE_DEBUG=1`. */
+  debug?: boolean;
+}
 
 interface IndexPage {
   route: string;
@@ -149,16 +156,35 @@ const renderedPathname = (
   format: 'directory' | 'file' | 'preserve',
 ) => publicPath(format === 'file' ? `/${route || 'index'}.html` : `/${route}`, base);
 
+interface DiagnosticLogger {
+  info(message: string): void;
+  warn(message: string): void;
+}
+
+type RecoverableStage = 'asset' | 'component' | 'link' | 'metadata' | 'page';
+
 const integration = (
   base: string,
   site: string | undefined,
   format: 'directory' | 'file' | 'preserve',
   owner: object,
+  options: StarlightLlmsTreeOptions,
 ): AstroIntegration => ({
   name: 'starlight-llms-tree',
   hooks: {
-    'astro:build:done': async ({ dir, pages }) => {
+    'astro:build:done': async ({ dir, logger, pages }) => {
       try {
+        const diagnostics = logger as DiagnosticLogger;
+        const debug = options.debug === true || process.env.STARLIGHT_LLMS_TREE_DEBUG === '1';
+        const debugLog = (message: string) => {
+          if (debug) diagnostics.info(`[starlight-llms-tree] ${message}`);
+        };
+        const recover = (stage: RecoverableStage, route: string, target: string, fallback: string) => {
+          const message = `Recoverable ${stage} normalization failure for route ${route} targeting ${target}`;
+          if (options.strict) throw new Error(message);
+          diagnostics.warn(`[starlight-llms-tree] ${message}; using ${fallback}`);
+          debugLog(`fallback stage=${stage} route=${route} target=${target} mode=${fallback}`);
+        };
         const collectionMetadata = readMetadata(owner);
         const docsPages = pages
           .flatMap(({ pathname }) => {
@@ -171,6 +197,7 @@ const integration = (
                     route,
                     finalPathname,
                     frontmatter: metadata.frontmatter,
+                    body: metadata.body,
                     locale: metadata.locale,
                     navigation: metadata.navigation,
                     outputUrl: markdownUrl(dir, route),
@@ -181,6 +208,9 @@ const integration = (
           })
           .filter(({ route }) => route !== '404')
           .sort((left, right) => compare(left.finalPathname, right.finalPathname));
+        for (const page of docsPages) {
+          debugLog(`route pathname=${page.finalPathname} target=${page.outputUrl.pathname}`);
+        }
         const rootPathname = publicPath('/', base);
         const root = docsPages.find(({ route }) => route === '');
         if (!root) {
@@ -207,41 +237,55 @@ const integration = (
         }
         for (const page of docsPages) {
           if (typeof page.frontmatter.title !== 'string' || !page.frontmatter.title.trim()) {
-            throw new Error(
-              `Normalized Starlight page ${page.finalPathname} for ${page.outputUrl.pathname} has no title`,
-            );
+            if (!page.route) {
+              throw new Error(
+                `Normalized Starlight page ${page.finalPathname} for ${page.outputUrl.pathname} has no title`,
+              );
+            }
+            recover('metadata', page.finalPathname, page.outputUrl.pathname, 'route-derived title');
+            page.frontmatter = { ...page.frontmatter, title: humanize(page.route) };
           }
         }
         const indexPages: IndexPage[] = docsPages.map((page) => {
-            const tags = page.frontmatter.tags ?? [];
-            if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) {
-              throw new Error(
-                `Starlight page tags for route ${page.finalPathname} targeting ${page.outputUrl.pathname} must be an array of strings`,
-              );
-            }
-            return {
-              route: page.route,
-              pathname: page.finalPathname,
-              locale: page.locale,
-              title: page.frontmatter.title as string,
-              description:
-                typeof page.frontmatter.description === 'string' && page.frontmatter.description.trim()
-                  ? page.frontmatter.description
-                  : undefined,
-              tags,
-              outputPathname: page.outputPathname,
-            };
-          });
+          let tags = page.frontmatter.tags ?? [];
+          if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) {
+            recover('metadata', page.finalPathname, page.outputUrl.pathname, 'empty tags');
+            tags = [];
+          }
+          return {
+            route: page.route,
+            pathname: page.finalPathname,
+            locale: page.locale,
+            title: page.frontmatter.title as string,
+            description:
+              typeof page.frontmatter.description === 'string' && page.frontmatter.description.trim()
+                ? page.frontmatter.description
+                : undefined,
+            tags: tags as string[],
+            outputPathname: page.outputPathname,
+          };
+        });
         const navigationOrder = new Map<string, number>();
         for (const page of docsPages) {
           for (const href of page.navigation) {
             if (typeof href !== 'string' || !href.startsWith('/')) continue;
-            const pathname = routePath(decodeURI(new URL(href, 'https://starlight.invalid').pathname));
+            let pathname: string;
+            try {
+              pathname = routePath(decodeURI(new URL(href, 'https://starlight.invalid').pathname));
+            } catch {
+              recover('metadata', page.finalPathname, page.outputUrl.pathname, 'remaining navigation');
+              continue;
+            }
             if (generatedDocs.has(pathname) && !navigationOrder.has(pathname)) {
               navigationOrder.set(pathname, navigationOrder.size);
             }
           }
         }
+        debugLog(
+          `ordering routes=${docsPages.map((page) => page.finalPathname).join(',')} navigation=${[
+            ...navigationOrder.keys(),
+          ].join(',')}`,
+        );
         const pagesByLocale = new Map<string | undefined, IndexPage[]>();
         for (const page of indexPages) {
           pagesByLocale.set(page.locale, [...(pagesByLocale.get(page.locale) ?? []), page]);
@@ -277,8 +321,23 @@ const integration = (
           outputTargets.add(artifact.url.href);
         }
 
+        debugLog(
+          `manifest pages=${docsPages.length} indexes=${indexArtifacts.length} targets=${outputTargets.size}`,
+        );
         const pageArtifacts = await Promise.all(
           docsPages.map(async (page) => {
+            const rawBody = () => {
+              if (typeof page.body !== 'string' || !page.body.trim()) {
+                throw new Error(
+                  `Authored raw body unavailable for route ${page.finalPathname} targeting ${page.outputUrl.pathname}`,
+                );
+              }
+              return page.body;
+            };
+            if (options.rawContent) {
+              debugLog(`normalization stage=bypass route=${page.finalPathname} mode=raw-content`);
+              return { url: page.outputUrl, content: rawBody() };
+            }
             let html: string;
             try {
               html = await readFile(pageUrl(dir, page.route, format), 'utf8');
@@ -288,24 +347,30 @@ const integration = (
                 { cause: error },
               );
             }
+            debugLog(`normalization stage=start route=${page.finalPathname}`);
             try {
-              return {
-                url: page.outputUrl,
-                content: normalizeStarlightPage(
-                  html,
-                  page.frontmatter,
-                  generatedDocs,
-                  page.finalPathname,
-                ),
-              };
-            } catch (error) {
-              throw new Error(
-                `Failed to normalize page ${page.finalPathname} for ${page.outputUrl.pathname}`,
-                { cause: error },
+              const content = normalizeStarlightPage(
+                html,
+                page.frontmatter,
+                generatedDocs,
+                page.finalPathname,
+                (stage) => recover(stage, page.finalPathname, page.outputUrl.pathname, 'preserved value'),
               );
+              debugLog(`normalization stage=complete route=${page.finalPathname}`);
+              return { url: page.outputUrl, content };
+            } catch (error) {
+              if (options.strict) {
+                throw new Error(
+                  `Failed to normalize page ${page.finalPathname} for ${page.outputUrl.pathname}`,
+                  { cause: error },
+                );
+              }
+              recover('page', page.finalPathname, page.outputUrl.pathname, 'authored raw body');
+              return { url: page.outputUrl, content: rawBody() };
             }
           }),
         );
+        debugLog(`manifest publish targets=${pageArtifacts.length + indexArtifacts.length}`);
         await publishGeneratedArtifacts([...pageArtifacts, ...indexArtifacts]);
       } finally {
         releaseMetadataOwner(owner);
@@ -314,33 +379,48 @@ const integration = (
   },
 });
 
-/** Creates Starlight plugin that emits LLMs Tree artifacts after static builds. */
-export const starlightLlmsTree = (_options: StarlightLlmsTreeOptions = {}) => ({
-  name: 'starlight-llms-tree',
-  hooks: {
-    'config:setup': ({
-      addIntegration,
-      addRouteMiddleware,
-      astroConfig,
-    }: {
-      addIntegration(integration: AstroIntegration): void;
-      addRouteMiddleware(config: { entrypoint: string }): void;
-      astroConfig: {
-        base: string;
-        site?: string;
-        build: { format: 'directory' | 'file' | 'preserve' };
-      };
-    }) => {
-      const owner = acquireMetadataOwner();
-      try {
-        addRouteMiddleware({ entrypoint: new URL('./metadata-middleware.js', import.meta.url).href });
-        addIntegration(
-          integration(astroConfig.base, astroConfig.site, astroConfig.build.format, owner),
-        );
-      } catch (error) {
-        releaseMetadataOwner(owner);
-        throw error;
-      }
+/**
+ * Creates Starlight plugin that emits LLMs Tree artifacts after static builds.
+ * `strict`, `rawContent`, and `debug` default to `false`; debug is also enabled by
+ * `STARLIGHT_LLMS_TREE_DEBUG=1`. `strict` and `rawContent` cannot both be enabled.
+ */
+export const starlightLlmsTree = (options: StarlightLlmsTreeOptions = {}) => {
+  for (const key of ['strict', 'rawContent', 'debug'] as const) {
+    if (options[key] !== undefined && typeof options[key] !== 'boolean') {
+      throw new TypeError(`starlight-llms-tree option ${key} must be a boolean`);
+    }
+  }
+  if (options.strict && options.rawContent) {
+    throw new Error('starlight-llms-tree options strict and rawContent cannot both be true');
+  }
+
+  return {
+    name: 'starlight-llms-tree',
+    hooks: {
+      'config:setup': ({
+        addIntegration,
+        addRouteMiddleware,
+        astroConfig,
+      }: {
+        addIntegration(integration: AstroIntegration): void;
+        addRouteMiddleware(config: { entrypoint: string }): void;
+        astroConfig: {
+          base: string;
+          site?: string;
+          build: { format: 'directory' | 'file' | 'preserve' };
+        };
+      }) => {
+        const owner = acquireMetadataOwner();
+        try {
+          addRouteMiddleware({ entrypoint: new URL('./metadata-middleware.js', import.meta.url).href });
+          addIntegration(
+            integration(astroConfig.base, astroConfig.site, astroConfig.build.format, owner, options),
+          );
+        } catch (error) {
+          releaseMetadataOwner(owner);
+          throw error;
+        }
+      },
     },
-  },
-});
+  };
+};
