@@ -1,0 +1,44 @@
+---
+title: Output
+description: Generated Markdown endpoint and recursive llms.txt output contract for starlight-llms-tree.
+---
+
+Static build emits Markdown next to HTML output. Every published docs page gets endpoint based on final public route. Every folder containing pages or child folders gets `llms.txt`.
+
+### I/O examples
+
+Source routes:
+
+```text
+/
+/guides/
+/guides/install/
+/reference/api/
+```
+
+Build output with `base: '/docs'`:
+
+```text
+dist/index.md
+dist/guides.md
+dist/guides/install.md
+dist/reference/api.md
+dist/llms.txt
+dist/guides/llms.txt
+dist/reference/llms.txt
+```
+
+Root index links direct pages and child folders. Each child index repeats same rule for its own direct pages and folders, so traversal is generic at any depth:
+
+```md
+# Docs
+
+## Folders
+
+- [Guides](/docs/guides/llms.txt)
+- [Reference](/docs/reference/llms.txt)
+```
+
+Page endpoint starts with JSON frontmatter copied from Starlight metadata, then normalized readable Markdown. Generated links target `.md` endpoints and `llms.txt` indexes. Draft pages, 404 page, redirects, and non-doc routes are excluded.
+
+Do not create files named `llms.txt` or generated `<route>.md` paths in static output; collision stops build without partial generated artifacts.
