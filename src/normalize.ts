@@ -76,16 +76,28 @@ const plainText = (node: HtmlNode): string =>
 
 const cleanText = (node: HtmlNode) => plainText(node).replace(/\s+/g, ' ').trim();
 
+export type NormalizationStage = 'asset' | 'component' | 'link';
+
 const rewriteDocsLink = (
   href: string,
   pagePathname: string,
   generatedDocs: ReadonlyMap<string, string>,
+  warn: (stage: NormalizationStage) => void,
 ) => {
-  if (/^(?:[a-z][a-z\d+.-]*:|\/\/|#|\?)/i.test(href)) return href;
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) {
+    try {
+      new URL(href, `https://generated.invalid${routePath(pagePathname)}`);
+    } catch {
+      warn('link');
+    }
+    return href;
+  }
+  if (/^[#?]/.test(href)) return href;
   let resolved: URL;
   try {
     resolved = new URL(href, `https://generated.invalid${routePath(pagePathname)}`);
   } catch {
+    warn('link');
     return href;
   }
   const resolvedPath = resolved.pathname
@@ -100,6 +112,19 @@ const rewriteDocsLink = (
   if (sourcePath.startsWith('/')) return `${target}${suffix}`;
   const relative = posix.relative(posix.dirname(source), target);
   return `${sourcePath.startsWith('./') && !relative.startsWith('.') ? './' : ''}${relative}${suffix}`;
+};
+
+const preserveAsset = (
+  value: string,
+  pagePathname: string,
+  warn: (stage: NormalizationStage) => void,
+) => {
+  try {
+    new URL(value, `https://generated.invalid${routePath(pagePathname)}`);
+  } catch {
+    warn('asset');
+  }
+  return value;
 };
 
 const normalizeBlocks = (value: string) =>
@@ -128,6 +153,7 @@ const renderRaw = (
   node: ElementNode,
   pagePathname: string,
   generatedDocs: ReadonlyMap<string, string>,
+  warn: (stage: NormalizationStage) => void,
 ): string => {
   if (
     ['script', 'style', 'svg', 'template'].includes(node.tag) ||
@@ -139,7 +165,12 @@ const renderRaw = (
     return '';
   const attributes = Object.entries(node.attributes)
     .map(([name, value]) => {
-      const rewritten = name === 'href' ? rewriteDocsLink(value, pagePathname, generatedDocs) : value;
+      const rewritten =
+        name === 'href'
+          ? rewriteDocsLink(value, pagePathname, generatedDocs, warn)
+          : name === 'src' || name === 'poster'
+            ? preserveAsset(value, pagePathname, warn)
+            : value;
       return ` ${name}="${escapeHtmlAttribute(rewritten)}"`;
     })
     .join('');
@@ -147,7 +178,7 @@ const renderRaw = (
     .map((child) =>
       child.type === 'text'
         ? child.value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        : renderRaw(child, pagePathname, generatedDocs),
+        : renderRaw(child, pagePathname, generatedDocs, warn),
     )
     .join('');
   return voidElements.has(node.tag)
@@ -159,6 +190,7 @@ const renderMarkdown = (
   content: ElementNode,
   pagePathname: string,
   generatedDocs: ReadonlyMap<string, string>,
+  warn: (stage: NormalizationStage) => void,
 ) => {
   const ids = new Map<string, string>();
   const collectIds = (node: ElementNode) => {
@@ -196,7 +228,7 @@ const renderMarkdown = (
       })
       .join('\n')}\n\n`;
   };
-  const render = (node: HtmlNode): string => {
+  const renderNode = (node: HtmlNode): string => {
     if (node.type === 'text') return escapeGfmText(node.value);
     if (
       ['script', 'style', 'svg', 'template'].includes(node.tag) ||
@@ -221,9 +253,15 @@ const renderMarkdown = (
         node.attributes.href ?? '',
         pagePathname,
         generatedDocs,
+        warn,
       )})`;
     }
-    if (node.tag === 'img') return `![${escapeGfmText(node.attributes.alt ?? '')}](${node.attributes.src ?? ''})`;
+    if (node.tag === 'img')
+      return `![${escapeGfmText(node.attributes.alt ?? '')}](${preserveAsset(
+        node.attributes.src ?? '',
+        pagePathname,
+        warn,
+      )})`;
     if (node.tag === 'strong' || node.tag === 'b') return `**${renderChildren(node)}**`;
     if (node.tag === 'em' || node.tag === 'i') return `_${renderChildren(node)}_`;
     if (node.tag === 'del' || node.tag === 's') return `~~${renderChildren(node)}~~`;
@@ -271,11 +309,26 @@ const renderMarkdown = (
     }
     if (node.tag === 'summary') return '';
     if (['kbd', 'mark', 'sub', 'sup', 'abbr'].includes(node.tag))
-      return renderRaw(node, pagePathname, generatedDocs);
+      return renderRaw(node, pagePathname, generatedDocs, warn);
     if (['table', 'video', 'audio', 'iframe', 'picture', 'source', 'track'].includes(node.tag))
-      return `${renderRaw(node, pagePathname, generatedDocs)}\n\n`;
+      return `${renderRaw(node, pagePathname, generatedDocs, warn)}\n\n`;
     if (['figure', 'figcaption'].includes(node.tag)) return `${renderChildren(node)}\n\n`;
     return renderChildren(node);
+  };
+  const render = (node: HtmlNode): string => {
+    try {
+      return renderNode(node);
+    } catch {
+      if (node.type === 'text') throw new Error('Failed to normalize text content');
+      const stage =
+        node.tag === 'a'
+          ? 'link'
+          : ['audio', 'iframe', 'img', 'picture', 'source', 'track', 'video'].includes(node.tag)
+            ? 'asset'
+            : 'component';
+      warn(stage);
+      return renderRaw(node, pagePathname, generatedDocs, warn);
+    }
   };
 
   return normalizeBlocks(renderChildren(content));
@@ -286,11 +339,12 @@ export const normalizeStarlightPage = (
   frontmatter: Record<string, unknown>,
   generatedDocs: ReadonlyMap<string, string>,
   pagePathname = '/',
+  warn: (stage: NormalizationStage) => void = () => {},
 ) => {
   const root = parseHtml(html);
   const content = findElement(root, (node) => hasClass(node, 'sl-markdown-content'));
   if (!content) throw new Error('Starlight page has no .sl-markdown-content element');
   const title = typeof frontmatter.title === 'string' && frontmatter.title.trim();
   if (!title) throw new Error('Normalized Starlight collection frontmatter has no title');
-  return `---\n${JSON.stringify(frontmatter, null, 2)}\n---\n\n# ${escapeGfmText(title)}\n\n${renderMarkdown(content, pagePathname, generatedDocs)}\n`;
+  return `---\n${JSON.stringify(frontmatter, null, 2)}\n---\n\n# ${escapeGfmText(title)}\n\n${renderMarkdown(content, pagePathname, generatedDocs, warn)}\n`;
 };
