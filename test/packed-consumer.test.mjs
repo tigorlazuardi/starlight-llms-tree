@@ -305,14 +305,14 @@ tags: [éclair/child]
   const failedWriteTarget = pathToFileURL(path.join(writeFailureRoot, 'index.md'));
   await assert.rejects(
     publishGeneratedArtifacts(
-      [{ url: failedWriteTarget, content: 'generated index\n' }],
+      [{ url: failedWriteTarget, content: 'generated index\n', sourceRoute: '/docs/write-failure/' }],
       link,
       async (file) => {
         await file.writeFile('partial');
         throw new Error('injected write failure');
       },
     ),
-    /injected write failure/,
+    /Failed to write temporary generated output for route \/docs\/write-failure\/ targeting .*index\.md/,
   );
   await assert.rejects(readFile(failedWriteTarget), { code: 'ENOENT' });
   assert.equal(
@@ -329,15 +329,15 @@ tags: [éclair/child]
   await assert.rejects(
     publishGeneratedArtifacts(
       [
-        { url: firstTarget, content: 'generated index\n' },
-        { url: secondTarget, content: 'generated manifest\n' },
+        { url: firstTarget, content: 'generated index\n', sourceRoute: '/docs/first/' },
+        { url: secondTarget, content: 'generated manifest\n', sourceRoute: '/docs/second/' },
       ],
       async (source, target) => {
         if (++publishes === 2) await writeFile(target, 'late collision must survive\n', { flag: 'wx' });
         await link(source, target);
       },
     ),
-    /Refusing to overwrite generated output target .*llms\.txt/,
+    /Refusing to overwrite generated output for route \/docs\/second\/ targeting .*llms\.txt/,
   );
   await assert.rejects(readFile(firstTarget), { code: 'ENOENT' });
   assert.equal(await readFile(secondTarget, 'utf8'), 'late collision must survive\n');
@@ -599,9 +599,13 @@ Guide français.
 
   await rm(path.join(root, 'public/index.md'));
   await put(root, 'public/llms.txt/marker', 'existing directory must survive\n');
-  await failedBuild(root, /Refusing to overwrite generated output target .*llms\.txt/);
-  await assert.rejects(readFile(path.join(root, 'dist/index.md')), { code: 'ENOENT' });
-  await assert.rejects(readFile(path.join(root, 'dist/guide.md')), { code: 'ENOENT' });
+  await failedBuild(root, /route \/docs\/ targeting .*llms\.txt/);
+  assert.deepEqual(
+    (await readdir(path.join(root, 'dist'), { recursive: true })).filter(
+      (name) => name.endsWith('.md') || (name.endsWith('llms.txt') && name !== 'llms.txt'),
+    ),
+    [],
+  );
   await assert.rejects(readFile(path.join(root, 'dist/404.md')), { code: 'ENOENT' });
   assert.equal(
     await readFile(path.join(root, 'dist/llms.txt/marker'), 'utf8'),

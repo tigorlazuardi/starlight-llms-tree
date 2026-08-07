@@ -6,8 +6,8 @@ import {
   releaseMetadataOwner,
 } from './metadata-middleware.js';
 import { normalizeStarlightPage } from './normalize.js';
-import { publishGeneratedArtifacts } from './publish.js';
-import { routePath } from './route.js';
+import { publishGeneratedArtifacts, validateOutputManifest } from './publish.js';
+import { assertSafeRoute, routePath } from './route.js';
 
 /** Options controlling normalization fallback and diagnostics. */
 export interface StarlightLlmsTreeOptions {
@@ -37,6 +37,7 @@ const publicPath = (pathname: string, base: string) => {
   return routePath(`${baseRoute}${route.slice(1)}`);
 };
 const routeFromPathname = (pathname: string, base: string) => {
+  assertSafeRoute(pathname);
   const finalPathname = publicPath(pathname, base);
   const baseRoute = routePath(base);
   const route =
@@ -312,17 +313,23 @@ const integration = (
           return allFolders.map((folder) => ({
             url: new URL(indexPath(folder), dir),
             content: renderIndex(folder, localePages, allFolders, base, site, navigationOrder),
+            sourceRoute: publicPath(`/${folder}`, base),
           }));
         });
-        for (const artifact of indexArtifacts) {
-          if (outputTargets.has(artifact.url.href)) {
-            throw new Error(`Duplicate generated output target ${artifact.url.pathname}`);
-          }
-          outputTargets.add(artifact.url.href);
-        }
+        await validateOutputManifest(
+          [
+            ...docsPages.map((page) => ({
+              url: page.outputUrl,
+              content: '',
+              sourceRoute: page.finalPathname,
+            })),
+            ...indexArtifacts,
+          ],
+          dir,
+        );
 
         debugLog(
-          `manifest pages=${docsPages.length} indexes=${indexArtifacts.length} targets=${outputTargets.size}`,
+          `manifest pages=${docsPages.length} indexes=${indexArtifacts.length} targets=${docsPages.length + indexArtifacts.length}`,
         );
         const pageArtifacts = await Promise.all(
           docsPages.map(async (page) => {
@@ -336,7 +343,7 @@ const integration = (
             };
             if (options.rawContent) {
               debugLog(`normalization stage=bypass route=${page.finalPathname} mode=raw-content`);
-              return { url: page.outputUrl, content: rawBody() };
+              return { url: page.outputUrl, sourceRoute: page.finalPathname, content: rawBody() };
             }
             let html: string;
             try {
@@ -357,7 +364,7 @@ const integration = (
                 (stage) => recover(stage, page.finalPathname, page.outputUrl.pathname, 'preserved value'),
               );
               debugLog(`normalization stage=complete route=${page.finalPathname}`);
-              return { url: page.outputUrl, content };
+              return { url: page.outputUrl, sourceRoute: page.finalPathname, content };
             } catch (error) {
               if (options.strict) {
                 throw new Error(
@@ -366,12 +373,17 @@ const integration = (
                 );
               }
               recover('page', page.finalPathname, page.outputUrl.pathname, 'authored raw body');
-              return { url: page.outputUrl, content: rawBody() };
+              return { url: page.outputUrl, sourceRoute: page.finalPathname, content: rawBody() };
             }
           }),
         );
         debugLog(`manifest publish targets=${pageArtifacts.length + indexArtifacts.length}`);
-        await publishGeneratedArtifacts([...pageArtifacts, ...indexArtifacts]);
+        await publishGeneratedArtifacts(
+          [...pageArtifacts, ...indexArtifacts],
+          undefined,
+          undefined,
+          dir,
+        );
       } finally {
         releaseMetadataOwner(owner);
       }
