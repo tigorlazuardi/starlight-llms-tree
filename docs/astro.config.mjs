@@ -11,7 +11,7 @@ export default defineConfig({
   integrations: [
     mermaid({ theme: 'neutral', autoTheme: true }),
     starlight({
-      title: 'starlight-llms-tree design docs',
+      title: 'starlight-llms-tree',
       customCss: ['./src/styles/print.css'],
       expressiveCode: {
         plugins: [pluginLineNumbers()],

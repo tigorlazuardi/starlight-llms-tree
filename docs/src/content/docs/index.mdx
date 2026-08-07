@@ -1,11 +1,23 @@
 ---
-title: starlight-llms-tree design docs
-description: Design decisions, architecture notes, and lesson-learnt reports for starlight-llms-tree.
+title: starlight-llms-tree
+description: Generate recursive llms.txt indexes and Markdown endpoints from published Starlight pages.
 ---
 
-Design and lesson-learnt docs for **starlight-llms-tree**.
+`starlight-llms-tree` turns a static Starlight build into a recursively traversable Markdown tree for LLM clients.
 
-- **Design decisions** — long-lived architecture choices (ADR-style).
-- **Reports** — lessons learnt from bugs, vendor quirks, and incidents. See [Index of Reports](/starlight-llms-tree/reports/).
+## Start here
 
-Working plans (`plans/**` at repo root) use the same MDX dialect but are not published here.
+```sh
+npm install starlight-llms-tree
+```
+
+Add `starlightLlmsTree()` to Starlight `plugins`, then run normal static build. Plugin writes root and folder `llms.txt` indexes plus one Markdown endpoint per published docs page.
+
+- [Install and use plugin](./usage/)
+- [Configure fallback and diagnostics](./usage/configuration/)
+- [Understand output and recursive traversal](./usage/output/)
+
+## Project reference
+
+- **Design decisions** document long-lived architecture choices.
+- **Reports** capture lessons from bugs, vendor quirks, and incidents. See [reports](./reports/).

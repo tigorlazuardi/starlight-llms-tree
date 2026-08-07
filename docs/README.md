@@ -1,49 +1,20 @@
-# Starlight Starter Kit: Basics
+# starlight-llms-tree documentation
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+Published user guides, design decisions, and lesson-learnt reports for `starlight-llms-tree`.
 
-```
-npm create astro@latest -- --template starlight
-```
+Read published docs at <https://tigorlazuardi.github.io/starlight-llms-tree/>.
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+## Run locally
 
-## 🚀 Project Structure
+Docs consume packed plugin, matching production deployment. From repository root:
 
-Inside of your Astro + Starlight project, you'll see the following folders and files:
-
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+```sh
+npm install
+tarball=$(npm pack --pack-destination /tmp --silent)
+npm install --prefix docs --no-save "/tmp/$tarball"
+npm run --prefix docs dev
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+Build static docs with `npm run --prefix docs build`.
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
-
-Static assets, like favicons, can be placed in the `public/` directory.
-
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+Product usage lives under `docs/src/content/docs/usage/`. Long-lived design decisions and reports live beside it under `design/` and `reports/`.
