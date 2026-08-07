@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 const maxBuffer = 10 * 1024 * 1024;
 
-const config = ({ format = 'directory', locales = false, navigation = false, site, trailingSlash = 'ignore' } = {}) => `import { defineConfig } from 'astro/config';
+const config = ({ format = 'directory', locales = false, navigation = false, options = '', site, trailingSlash = 'ignore' } = {}) => `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { starlightLlmsTree } from 'starlight-llms-tree';
 export default defineConfig({
@@ -23,7 +23,7 @@ export default defineConfig({
     title: 'Fixture docs',
     ${locales ? "locales: { root: { label: 'English', lang: 'en' }, fr: { label: 'Français', lang: 'fr' } }," : ''}
     ${navigation ? "sidebar: [{ slug: 'guide' }, { slug: 'eclair' }, { label: 'Guides', items: [{ slug: 'guides/install' }, { slug: 'guide' }] }, { label: 'Reference', items: [{ slug: 'reference/api/endpoints' }] }]," : ''}
-    plugins: [starlightLlmsTree()],
+    plugins: [starlightLlmsTree(${options})],
   })],
 });
 `;
@@ -290,6 +290,11 @@ tags: [éclair/child]
   const installed = path.join(root, 'node_modules/starlight-llms-tree');
   const module = await import(pathToFileURL(path.join(installed, 'dist/index.js')));
   assert.deepEqual(Object.keys(module), ['starlightLlmsTree']);
+  assert.throws(
+    () => module.starlightLlmsTree({ strict: true, rawContent: true }),
+    /strict and rawContent cannot both be true/,
+  );
+  assert.throws(() => module.starlightLlmsTree({ debug: 'yes' }), /debug must be a boolean/);
 
   const { publishGeneratedArtifacts } = await import(
     pathToFileURL(path.join(installed, 'dist/publish.js'))
@@ -576,6 +581,17 @@ Guide français.
   await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
   assert.deepEqual(await artifactLinks(root), fileFormatLinks);
 
+  await put(root, 'astro.config.mjs', config({ options: '{ rawContent: true, debug: true }' }));
+  const rawBuild = await exec('npm', ['run', 'build'], { cwd: root, maxBuffer });
+  const rawMarkdown = await readFile(path.join(root, 'dist/index.md'), 'utf8');
+  assert.match(rawMarkdown, /import \{ Aside, FileTree, TabItem, Tabs \}/);
+  assert.match(rawMarkdown, /Welcome to the packed consumer\. This content must remain readable\./);
+  assert.doesNotMatch(rawMarkdown, /^---/);
+  assert.match(`${rawBuild.stdout}\n${rawBuild.stderr}`, /normalization stage=bypass route=\/docs\//);
+  assert.match(`${rawBuild.stdout}\n${rawBuild.stderr}`, /manifest publish targets=/);
+  assert.doesNotMatch(`${rawBuild.stdout}\n${rawBuild.stderr}`, /This content must remain readable/);
+
+  await put(root, 'astro.config.mjs', config({ format: 'preserve', locales: true, site: 'https://deploy.example' }));
   await put(root, 'public/index.md', 'existing file must survive\n');
   await failedBuild(root, /Refusing to overwrite generated output target .*index\.md/);
   await assert.rejects(readFile(path.join(root, 'dist/llms.txt')), { code: 'ENOENT' });

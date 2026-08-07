@@ -5,6 +5,7 @@ const metadataKey = Symbol.for('starlight-llms-tree.frontmatter');
 type Owner = object;
 interface MetadataRecord {
   frontmatter: Record<string, unknown>;
+  body?: string;
   locale?: string;
   navigation: string[];
 }
@@ -60,7 +61,7 @@ export const onRequest: MiddlewareHandler = (context, next) => {
   const route = (
     context.locals as {
       starlightRoute?: {
-        entry?: { collection?: unknown; data?: Record<string, unknown> };
+        entry?: { body?: unknown; collection?: unknown; data?: Record<string, unknown> };
         isFallback?: boolean;
         locale?: string;
         sidebar?: unknown;
@@ -76,6 +77,7 @@ export const onRequest: MiddlewareHandler = (context, next) => {
   ) {
     current.records.set(routePath(decodeURI(context.url.pathname).normalize('NFC')), {
       frontmatter: route.entry.data,
+      body: typeof route.entry.body === 'string' ? route.entry.body : undefined,
       locale: route.locale,
       navigation: navigationHrefs(route.sidebar),
     });

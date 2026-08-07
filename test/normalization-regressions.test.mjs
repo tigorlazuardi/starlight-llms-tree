@@ -88,6 +88,21 @@ test('normalization treats script and style bodies as raw text before page conte
   }
 });
 
+test('normalization preserves malformed links and assets while reporting recoverable stages', () => {
+  const stages = [];
+  const markdown = normalizeStarlightPage(
+    page('<p><a href="http://[">broken link</a><img alt="broken asset" src="http://["></p>'),
+    frontmatter,
+    generatedDocs,
+    '/docs/',
+    (stage) => stages.push(stage),
+  );
+
+  assert.match(markdown, /\[broken link\]\(http:\/\/\[\)/);
+  assert.match(markdown, /!\[broken asset\]\(http:\/\/\[\)/);
+  assert.deepEqual(stages, ['link', 'asset']);
+});
+
 test('normalization preserves Markdown semantics and rewrites explicit index routes', () => {
   const markdown = normalize(page(`
 <p>Literal &lt;Widget&gt;, \\ slash, [brackets], *stars*, and _underscores_.<br>Next line.</p>
