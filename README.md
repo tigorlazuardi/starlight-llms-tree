@@ -2,6 +2,8 @@
 
 Generate recursive `llms.txt` indexes and Markdown endpoints for every published page in a static Starlight site.
 
+**[Read documentation →](https://tigorlazuardi.github.io/starlight-llms-tree/)**
+
 ## Requirements
 
 - Node.js 22.12 or later
