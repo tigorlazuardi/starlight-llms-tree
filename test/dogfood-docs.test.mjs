@@ -38,8 +38,10 @@ test('packed package builds repository usage site with documented endpoints', as
   ]);
 
   assert.match(rootIndex, /\[Usage\]\(https:\/\/tigorlazuardi\.github\.io\/starlight-llms-tree\/usage\/llms\.txt\)/);
-  assert.match(usageIndex, /\[Configuration\].*configuration\.md/);
-  assert.match(usageIndex, /\[Output\].*output\.md/);
+  assert.match(rootIndex, /Scopes: `configuration`, `diagnostics`, `metadata`, `output`, `setup`, `traversal`/);
+  assert.match(usageIndex, /\[Overview\].*\n  - Tags: `setup\/install`, `setup\/configuration`/);
+  assert.match(usageIndex, /\[Configuration\].*configuration\.md.*\n  - Tags: `configuration\/options`, `diagnostics\/errors`, `diagnostics\/debug`/);
+  assert.match(usageIndex, /\[Output\].*output\.md.*\n  - Tags: `output\/contract`, `traversal\/recursive`, `metadata\/tags`, `metadata\/scopes`/);
   assert.match(usagePage, /starlightLlmsTree\(\)/);
   assert.match(configurationPage, /STARLIGHT_LLMS_TREE_DEBUG=1/);
   assert.match(outputPage, /dist\/reference\/api\.md/);
