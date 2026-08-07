@@ -272,13 +272,6 @@ const integration = (
             sourceRoute: publicPath(`/${folder}`, base),
           }));
         });
-        for (const artifact of indexArtifacts) {
-          if (outputTargets.has(artifact.url.href)) {
-            throw new Error(`Duplicate generated output target ${artifact.url.pathname}`);
-          }
-          outputTargets.add(artifact.url.href);
-        }
-
         await validateOutputManifest(
           [
             ...docsPages.map((page) => ({

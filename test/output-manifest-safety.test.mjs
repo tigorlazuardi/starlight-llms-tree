@@ -83,6 +83,49 @@ test('manifest rejects portable generated collisions and output-directory escape
   assert.deepEqual(await readdir(root), []);
 });
 
+test('publisher failures name source route and target without partial artifacts', async (t) => {
+  const root = await fixture(t);
+  const outputDirectory = pathToFileURL(`${root}${path.sep}`);
+  const failures = [
+    {
+      artifact: artifact(root, 'missing/open.md', '/docs/open/'),
+      publish: (candidate) => publishGeneratedArtifacts([candidate], undefined, undefined, outputDirectory),
+      message: /Failed to open temporary generated output for route \/docs\/open\/ targeting .*open\.md/,
+    },
+    {
+      artifact: artifact(root, 'write.md', '/docs/write/'),
+      publish: (candidate) =>
+        publishGeneratedArtifacts(
+          [candidate],
+          undefined,
+          async () => {
+            throw new Error('injected write failure');
+          },
+          outputDirectory,
+        ),
+      message: /Failed to write temporary generated output for route \/docs\/write\/ targeting .*write\.md/,
+    },
+    {
+      artifact: artifact(root, 'link.md', '/docs/link/'),
+      publish: (candidate) =>
+        publishGeneratedArtifacts(
+          [candidate],
+          async () => {
+            throw Object.assign(new Error('injected link failure'), { code: 'EACCES' });
+          },
+          undefined,
+          outputDirectory,
+        ),
+      message: /Failed to publish generated output for route \/docs\/link\/ targeting .*link\.md/,
+    },
+  ];
+
+  for (const failure of failures) {
+    await assert.rejects(failure.publish(failure.artifact), failure.message);
+  }
+  assert.deepEqual(await readdir(root), []);
+});
+
 test('existing portable file and directory collisions leave zero generated artifacts', async (t) => {
   const root = await fixture(t);
   const outputDirectory = pathToFileURL(`${root}${path.sep}`);

@@ -6,11 +6,13 @@ import { fileURLToPath } from 'node:url';
 interface Artifact {
   url: URL;
   content: string;
-  sourceRoute?: string;
+  sourceRoute: string;
 }
 
 const portablePath = (value: string) => value.normalize('NFC').toUpperCase().normalize('NFC');
-const source = (artifact: Artifact) => artifact.sourceRoute ?? '<unknown route>';
+const source = (artifact: Artifact) => artifact.sourceRoute;
+const writeError = (action: string, artifact: Artifact, cause: unknown) =>
+  new Error(`${action} for route ${source(artifact)} targeting ${artifact.url.pathname}`, { cause });
 
 /** @internal */
 export const validateOutputManifest = async (artifacts: Artifact[], outputDirectory: URL) => {
@@ -115,40 +117,45 @@ export const publishGeneratedArtifacts = async (
   if (artifacts.length === 0) return;
   await validateOutputManifest(artifacts, outputDirectory ?? new URL('.', artifacts[0].url));
 
-  const staged: Array<{ target: URL; temporary: URL }> = [];
-  const published: URL[] = [];
+  const staged: Array<{ artifact: Artifact; temporary: URL }> = [];
+  const published: Artifact[] = [];
 
   try {
-    for (const { url: target, content } of artifacts) {
-      const temporary = new URL(target);
+    for (const artifact of artifacts) {
+      const temporary = new URL(artifact.url);
       temporary.pathname += `.starlight-llms-tree-${randomUUID()}.tmp`;
-      const file = await open(temporary, 'wx');
-      staged.push({ target, temporary });
+      let file: FileHandle;
       try {
-        await writeTemporary(file, content);
+        file = await open(temporary, 'wx');
+      } catch (error) {
+        throw writeError('Failed to open temporary generated output', artifact, error);
+      }
+      staged.push({ artifact, temporary });
+      try {
+        await writeTemporary(file, artifact.content);
+      } catch (error) {
+        throw writeError('Failed to write temporary generated output', artifact, error);
       } finally {
         await file.close();
       }
     }
 
-    for (const { target, temporary } of staged) {
+    for (const { artifact, temporary } of staged) {
       try {
-        await linkFile(temporary, target);
+        await linkFile(temporary, artifact.url);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-          throw new Error(`Refusing to overwrite generated output target ${target.pathname}`, {
-            cause: error,
-          });
+          throw writeError('Refusing to overwrite generated output', artifact, error);
         }
-        throw error;
+        throw writeError('Failed to publish generated output', artifact, error);
       }
-      published.push(target);
+      published.push(artifact);
     }
 
     await Promise.all(staged.map(({ temporary }) => unlink(temporary)));
   } catch (error) {
     const cleanup = await Promise.allSettled([
-      ...published.map((target) => unlink(target)),
+      ...published.map(({ url }) => unlink(url)),
       ...staged.map(({ temporary }) => unlink(temporary)),
     ]);
     const cleanupErrors = cleanup.flatMap((result) =>
