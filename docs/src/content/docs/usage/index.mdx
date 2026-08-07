@@ -4,7 +4,18 @@ description: Generate recursive llms.txt indexes and Markdown endpoints from Sta
 tags: [setup/install, setup/configuration]
 ---
 
-`starlight-llms-tree` writes one Markdown endpoint per published Starlight page plus recursive `llms.txt` indexes after `astro build`.
+`starlight-llms-tree` makes static Starlight documentation directly traversable and readable by LLM clients.
+
+## What the plugin does
+
+During `astro build`, plugin reads final published Starlight routes and adds a parallel LLM-friendly output tree:
+
+- each published page gets a Markdown endpoint;
+- root and nested folders get `llms.txt` indexes;
+- indexes expose page tags and aggregated folder scopes for discovery;
+- internal links point to generated Markdown and folder indexes.
+
+LLM client starts at root `llms.txt`, chooses relevant folder from its scopes, follows nested indexes, then fetches only needed Markdown pages. Plugin runs at build time: it does not change rendered site pages or add runtime server endpoints.
 
 ## Requirements
 

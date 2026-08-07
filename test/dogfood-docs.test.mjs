@@ -29,9 +29,10 @@ test('packed package builds repository usage site with documented endpoints', as
   await run(site, ['run', 'build']);
 
   const dist = path.join(site, 'dist');
-  const [rootIndex, usageIndex, usagePage, configurationPage, outputPage] = await Promise.all([
+  const [rootIndex, usageIndex, homePage, usagePage, configurationPage, outputPage] = await Promise.all([
     readFile(path.join(dist, 'llms.txt'), 'utf8'),
     readFile(path.join(dist, 'usage/llms.txt'), 'utf8'),
+    readFile(path.join(dist, 'index.html'), 'utf8'),
     readFile(path.join(dist, 'usage.md'), 'utf8'),
     readFile(path.join(dist, 'usage/configuration.md'), 'utf8'),
     readFile(path.join(dist, 'usage/output.md'), 'utf8'),
@@ -39,9 +40,12 @@ test('packed package builds repository usage site with documented endpoints', as
 
   assert.match(rootIndex, /\[Usage\]\(https:\/\/tigorlazuardi\.github\.io\/starlight-llms-tree\/usage\/llms\.txt\)/);
   assert.match(rootIndex, /Scopes: `configuration`, `diagnostics`, `metadata`, `output`, `setup`, `traversal`/);
+  assert.match(homePage, /href="(?:\.\/|\/starlight-llms-tree\/)llms\.txt"[^>]*>\s*Open llms\.txt/);
   assert.match(usageIndex, /\[Overview\].*\n  - Tags: `setup\/install`, `setup\/configuration`/);
   assert.match(usageIndex, /\[Configuration\].*configuration\.md.*\n  - Tags: `configuration\/options`, `diagnostics\/errors`, `diagnostics\/debug`/);
   assert.match(usageIndex, /\[Output\].*output\.md.*\n  - Tags: `output\/contract`, `traversal\/recursive`, `metadata\/tags`, `metadata\/scopes`/);
+  assert.match(usagePage, /## What the plugin does/);
+  assert.match(usagePage, /does not change rendered site pages or add runtime server endpoints/);
   assert.match(usagePage, /starlightLlmsTree\(\)/);
   assert.match(configurationPage, /STARLIGHT_LLMS_TREE_DEBUG=1/);
   assert.match(outputPage, /dist\/reference\/api\.md/);
