@@ -9,6 +9,8 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const maxBuffer = 10 * 1024 * 1024;
+const astroVersion = process.env.ASTRO_VERSION ?? '7.0.2';
+const starlightVersion = process.env.STARLIGHT_VERSION ?? '0.41.6';
 
 const config = ({ format = 'directory', locales = false, navigation = false, options = '', site, trailingSlash = 'ignore' } = {}) => `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
@@ -75,8 +77,8 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
       type: 'module',
       scripts: { build: 'astro build', typecheck: 'astro sync && tsc --noEmit' },
       dependencies: {
-        '@astrojs/starlight': '0.41.6',
-        astro: '7.1.6',
+        '@astrojs/starlight': starlightVersion,
+        astro: astroVersion,
         'starlight-llms-tree': `file:${path.join(root, packed)}`,
         typescript: '5.9.3',
       },
@@ -93,9 +95,13 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
     'type-proof.ts',
     `import type { StarlightPlugin } from '@astrojs/starlight/types';
 import { starlightLlmsTree, type StarlightLlmsTreeOptions } from 'starlight-llms-tree';
-const options: StarlightLlmsTreeOptions = {};
+const options: StarlightLlmsTreeOptions = { strict: false, rawContent: false, debug: false };
 const plugin: StarlightPlugin = starlightLlmsTree(options);
 plugin.name satisfies string;
+// @ts-expect-error API-version options are not supported.
+starlightLlmsTree({ apiVersion: 1 });
+// @ts-expect-error Public options accept booleans only.
+starlightLlmsTree({ debug: 'yes' });
 `,
   );
   await put(
@@ -288,6 +294,18 @@ tags: [éclair/child]
   });
 
   const installed = path.join(root, 'node_modules/starlight-llms-tree');
+  const manifest = JSON.parse(await readFile(path.join(installed, 'package.json'), 'utf8'));
+  assert.deepEqual(manifest.exports, {
+    '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+  });
+  assert.equal(manifest.type, 'module');
+  assert.equal(manifest.bin, undefined);
+  assert.equal(manifest.engines.node, '>=22.12.0');
+  assert.deepEqual(manifest.peerDependencies, {
+    '@astrojs/starlight': '>=0.41.6 <0.42',
+    astro: '>=7.0.2 <8',
+  });
+
   const module = await import(pathToFileURL(path.join(installed, 'dist/index.js')));
   assert.deepEqual(Object.keys(module), ['starlightLlmsTree']);
   assert.throws(

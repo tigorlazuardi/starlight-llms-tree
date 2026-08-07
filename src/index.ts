@@ -191,7 +191,11 @@ const integration = (
           .flatMap(({ pathname }) => {
             const finalPathname = publicPath(pathname, base);
             const route = routeFromPathname(finalPathname, base);
-            const metadata = collectionMetadata.get(renderedPathname(route, base, format));
+            const metadata =
+              collectionMetadata.get(renderedPathname(route, base, format)) ??
+              (format === 'preserve'
+                ? collectionMetadata.get(renderedPathname(route, base, 'file'))
+                : undefined);
             return metadata
               ? [
                   {
