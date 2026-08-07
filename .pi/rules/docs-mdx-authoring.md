@@ -1,5 +1,5 @@
 ---
 paths: "docs/src/content/docs/**/*.mdx"
-skills: astro-docs-authoring
 ---
-Published content here consists of long-lived design docs and lesson-learnt reports.
+Write public library documentation for users. Cover supported installation, API/configuration, output, and troubleshooting without project workflow, agent, planning, or design-process conventions.
+Keep landing page and primary navigation task-oriented; link implementation internals only when users need them.

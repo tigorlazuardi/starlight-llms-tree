@@ -39,6 +39,32 @@ Root index links direct pages and child folders. Each child index repeats same r
 - [Reference](/docs/reference/llms.txt)
 ```
 
+## Tags and scopes
+
+Add tags to normal Starlight page frontmatter. Page entries preserve complete tag strings:
+
+```md
+---
+title: Install
+description: Install on supported platforms.
+tags: [setup/linux, setup/mac]
+---
+```
+
+```md
+- [Install](/docs/guides/install.md): Install on supported platforms.
+  - Tags: `setup/linux`, `setup/mac`
+```
+
+Folder entries summarize descendant tags as sorted, unique scopes. Scope is text before first `/`; tag without `/` is already complete scope. Given descendants tagged `guide`, `setup/linux`, and `setup/mac`, parent index contains:
+
+```md
+- [Guides](/docs/guides/llms.txt)
+  - Scopes: `guide`, `setup`
+```
+
+Clients can inspect scopes to choose folder, then follow its `llms.txt` and inspect full page tags without knowing tree depth.
+
 Page endpoint starts with JSON frontmatter copied from Starlight metadata, then normalized readable Markdown. Generated links target `.md` endpoints and `llms.txt` indexes. Draft pages, 404 page, redirects, and non-doc routes are excluded.
 
 Do not create files named `llms.txt` or generated `<route>.md` paths in static output; collision stops build without partial generated artifacts.

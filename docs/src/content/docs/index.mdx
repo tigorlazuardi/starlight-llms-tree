@@ -1,23 +1,34 @@
 ---
 title: starlight-llms-tree
 description: Generate recursive llms.txt indexes and Markdown endpoints from published Starlight pages.
+template: splash
+hero:
+  title: starlight-llms-tree
+  tagline: Turn static Starlight docs into a recursively traversable Markdown tree for LLM clients.
+  actions:
+    - text: Get started
+      link: ./usage/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/tigorlazuardi/starlight-llms-tree
+      variant: minimal
+      icon: external
 ---
 
-`starlight-llms-tree` turns a static Starlight build into a recursively traversable Markdown tree for LLM clients.
+## Build once. Traverse every folder.
 
-## Start here
+`starlight-llms-tree` adds LLM-friendly artifacts to normal static Starlight builds:
+
+- recursive `llms.txt` indexes from root to nested folders;
+- one Markdown endpoint per published docs page;
+- final links that respect Astro `site`, `base`, and public routes.
+
+## Start with existing Starlight config
 
 ```sh
 npm install starlight-llms-tree
 ```
 
-Add `starlightLlmsTree()` to Starlight `plugins`, then run normal static build. Plugin writes root and folder `llms.txt` indexes plus one Markdown endpoint per published docs page.
+Add `starlightLlmsTree()` to Starlight `plugins`, then run normal static build. No custom content tree or runtime server required.
 
-- [Install and use plugin](./usage/)
-- [Configure fallback and diagnostics](./usage/configuration/)
-- [Understand output and recursive traversal](./usage/output/)
-
-## Project reference
-
-- **Design decisions** document long-lived architecture choices.
-- **Reports** capture lessons from bugs, vendor quirks, and incidents. See [reports](./reports/).
+[Install and configure plugin](./usage/)
