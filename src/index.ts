@@ -11,11 +11,11 @@ import { routePath } from './route.js';
 
 /** Options controlling normalization fallback and diagnostics. */
 export interface StarlightLlmsTreeOptions {
-  /** Treat recoverable normalization failures as fatal. Cannot be combined with `rawContent`. */
+  /** Treat recoverable normalization failures as fatal. Defaults to `false`. Cannot be combined with `rawContent`. */
   strict?: boolean;
-  /** Emit authored page bodies without normalization. Cannot be combined with `strict`. */
+  /** Emit authored page bodies without normalization. Defaults to `false`. Cannot be combined with `strict`. */
   rawContent?: boolean;
-  /** Emit content-free diagnostic logs. Also enabled by `STARLIGHT_LLMS_TREE_DEBUG=1`. */
+  /** Emit content-free diagnostic logs. Defaults to `false`; also enabled by `STARLIGHT_LLMS_TREE_DEBUG=1`. */
   debug?: boolean;
 }
 
@@ -379,7 +379,11 @@ const integration = (
   },
 });
 
-/** Creates Starlight plugin that emits LLMs Tree artifacts after static builds. */
+/**
+ * Creates Starlight plugin that emits LLMs Tree artifacts after static builds.
+ * `strict`, `rawContent`, and `debug` default to `false`; debug is also enabled by
+ * `STARLIGHT_LLMS_TREE_DEBUG=1`. `strict` and `rawContent` cannot both be enabled.
+ */
 export const starlightLlmsTree = (options: StarlightLlmsTreeOptions = {}) => {
   for (const key of ['strict', 'rawContent', 'debug'] as const) {
     if (options[key] !== undefined && typeof options[key] !== 'boolean') {
