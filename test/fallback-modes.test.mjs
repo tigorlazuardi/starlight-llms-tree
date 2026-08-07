@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { starlightLlmsTree } from '../dist/index.js';
 import { onRequest } from '../dist/metadata-middleware.js';
 
-const runBuild = async (root, options = {}) => {
+const runBuild = async (root, options = {}, includeGuide = false) => {
   let integration;
   const plugin = starlightLlmsTree(options);
   plugin.hooks['config:setup']({
@@ -33,6 +33,24 @@ const runBuild = async (root, options = {}) => {
     },
     async () => new Response(),
   );
+  if (includeGuide) {
+    await onRequest(
+      {
+        locals: {
+          starlightRoute: {
+            entry: {
+              body: 'Guide authored body.\n',
+              collection: 'docs',
+              data: { title: 'Guide' },
+            },
+            sidebar: [],
+          },
+        },
+        url: new URL('https://example.test/guide/'),
+      },
+      async () => new Response(),
+    );
+  }
   const messages = { debug: [], warn: [] };
   await integration.hooks['astro:build:done']({
     dir: pathToFileURL(`${root}${path.sep}`),
@@ -44,7 +62,7 @@ const runBuild = async (root, options = {}) => {
         messages.warn.push(message);
       },
     },
-    pages: [{ pathname: '/' }],
+    pages: [{ pathname: '/' }, ...(includeGuide ? [{ pathname: '/guide/' }] : [])],
   });
   return messages;
 };
@@ -53,10 +71,16 @@ test('recoverable page failure emits authored raw body and warning', async (t) =
   const root = await mkdtemp(path.join(tmpdir(), 'starlight-fallback-'));
   t.after(() => rm(root, { force: true, recursive: true }));
   await writeFile(path.join(root, 'index.html'), '<main>missing Starlight content</main>');
+  await mkdir(path.join(root, 'guide'));
+  await writeFile(
+    path.join(root, 'guide/index.html'),
+    '<main class="sl-markdown-content"><p>Normalized guide body.</p></main>',
+  );
 
-  const messages = await runBuild(root);
+  const messages = await runBuild(root, {}, true);
 
   assert.equal(await readFile(path.join(root, 'index.md'), 'utf8'), 'Authored **raw** body.\n');
+  assert.match(await readFile(path.join(root, 'guide.md'), 'utf8'), /Normalized guide body\./);
   assert.equal(messages.warn.length, 1);
   assert.match(messages.warn[0], /Recoverable page normalization failure.*authored raw body/);
   assert.deepEqual(messages.debug, []);
