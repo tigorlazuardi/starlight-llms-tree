@@ -1,7 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import { starlightLlmsTree } from 'starlight-llms-tree';
+import { starlightLlmsTree } from '@tigorhutasuhut/starlight-llms-tree';
 
 export default defineConfig({
   site: 'https://tigorlazuardi.github.io',

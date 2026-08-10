@@ -13,7 +13,7 @@ Generate recursive `llms.txt` indexes and Markdown endpoints for every published
 ## Install
 
 ```sh
-npm install starlight-llms-tree
+npm install @tigorhutasuhut/starlight-llms-tree
 ```
 
 Add plugin to Starlight integration:
@@ -21,7 +21,7 @@ Add plugin to Starlight integration:
 ```js
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import { starlightLlmsTree } from 'starlight-llms-tree';
+import { starlightLlmsTree } from '@tigorhutasuhut/starlight-llms-tree';
 
 export default defineConfig({
   integrations: [

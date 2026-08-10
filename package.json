@@ -1,6 +1,6 @@
 {
-  "name": "starlight-llms-tree",
-  "version": "0.0.0",
+  "name": "@tigorhutasuhut/starlight-llms-tree",
+  "version": "0.1.0",
   "type": "module",
   "exports": {
     ".": {
@@ -30,5 +30,18 @@
   },
   "dependencies": {
     "parse5": "^7.3.0"
+  },
+  "description": "Generate recursive llms.txt indexes and Markdown endpoints for static Starlight sites.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tigorlazuardi/starlight-llms-tree.git"
+  },
+  "homepage": "https://tigorlazuardi.github.io/starlight-llms-tree/",
+  "bugs": {
+    "url": "https://github.com/tigorlazuardi/starlight-llms-tree/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

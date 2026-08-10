@@ -14,7 +14,7 @@ const starlightVersion = process.env.STARLIGHT_VERSION ?? '0.41.6';
 
 const config = ({ format = 'directory', locales = false, navigation = false, options = '', site, trailingSlash = 'ignore' } = {}) => `import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import { starlightLlmsTree } from 'starlight-llms-tree';
+import { starlightLlmsTree } from '@tigorhutasuhut/starlight-llms-tree';
 export default defineConfig({
   base: '/docs',
   build: { format: '${format}' },
@@ -79,7 +79,7 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
       dependencies: {
         '@astrojs/starlight': starlightVersion,
         astro: astroVersion,
-        'starlight-llms-tree': `file:${path.join(root, packed)}`,
+        '@tigorhutasuhut/starlight-llms-tree': `file:${path.join(root, packed)}`,
         typescript: '5.9.3',
       },
     }),
@@ -94,7 +94,7 @@ test('packed plugin typechecks and builds a real Starlight consumer safely', asy
     root,
     'type-proof.ts',
     `import type { StarlightPlugin } from '@astrojs/starlight/types';
-import { starlightLlmsTree, type StarlightLlmsTreeOptions } from 'starlight-llms-tree';
+import { starlightLlmsTree, type StarlightLlmsTreeOptions } from '@tigorhutasuhut/starlight-llms-tree';
 const options: StarlightLlmsTreeOptions = { strict: false, rawContent: false, debug: false };
 const plugin: StarlightPlugin = starlightLlmsTree(options);
 plugin.name satisfies string;
@@ -293,7 +293,7 @@ tags: [éclair/child]
     maxBuffer,
   });
 
-  const installed = path.join(root, 'node_modules/starlight-llms-tree');
+  const installed = path.join(root, 'node_modules/@tigorhutasuhut/starlight-llms-tree');
   const manifest = JSON.parse(await readFile(path.join(installed, 'package.json'), 'utf8'));
   assert.deepEqual(manifest.exports, {
     '.': { types: './dist/index.d.ts', import: './dist/index.js' },

@@ -1,0 +1,45 @@
+name: Publish package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # ponytail: stable releases only; add an npm prerelease dist-tag when prereleases become necessary.
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@tigorhutasuhut/starlight-llms-tree
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module <<'EOF'
+          import packageJson from './package.json' with { type: 'json' };
+          const expected = `v${packageJson.version}`;
+          if (process.env.RELEASE_TAG !== expected) {
+            throw new Error(`Release tag ${process.env.RELEASE_TAG} must equal ${expected}`);
+          }
+          EOF
+      - run: npm test
+      - run: npm publish --access public
