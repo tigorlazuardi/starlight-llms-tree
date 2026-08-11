@@ -228,6 +228,77 @@ const renderMarkdown = (
       })
       .join('\n')}\n\n`;
   };
+  const renderTable = (table: ElementNode): string | undefined => {
+    const rows = table.children.flatMap((child) => {
+      if (child.type !== 'element') return [];
+      if (child.tag === 'tr') return [child];
+      if (!['thead', 'tbody', 'tfoot'].includes(child.tag)) return [];
+      return child.children.filter(
+        (row): row is ElementNode => row.type === 'element' && row.tag === 'tr',
+      );
+    });
+    const cells = rows.map((row) =>
+      row.children.filter(
+        (cell): cell is ElementNode =>
+          cell.type === 'element' && (cell.tag === 'th' || cell.tag === 'td'),
+      ),
+    );
+    const width = cells[0]?.length ?? 0;
+    const blockTags = new Set([
+      'blockquote',
+      'details',
+      'div',
+      'figure',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'hr',
+      'ol',
+      'p',
+      'pre',
+      'table',
+      'ul',
+    ]);
+    if (
+      width === 0 ||
+      cells[0].some((cell) => cell.tag !== 'th') ||
+      cells.some((row) => row.length !== width) ||
+      cells.flat().some(
+        (cell) =>
+          'rowspan' in cell.attributes ||
+          'colspan' in cell.attributes ||
+          cell.children.some(
+            (child) =>
+              child.type === 'element' && Boolean(findElement(child, (descendant) => blockTags.has(descendant.tag))),
+          ),
+      )
+    )
+      return;
+
+    const rendered = cells.map((row) =>
+      row.map((cell) => {
+        const value = normalizeBlocks(cell.children.map(render).join(''));
+        return value.includes('\n') ? undefined : value.replace(/(^|[^\\])\|/g, '$1\\|');
+      }),
+    );
+    if (rendered.flat().some((cell) => cell === undefined)) return;
+    const delimiters = cells[0].map((cell) => {
+      const alignment =
+        cell.attributes.align ?? cell.attributes.style?.match(/(?:^|;)\s*text-align:\s*(left|center|right)/i)?.[1];
+      if (alignment === 'left') return ':---';
+      if (alignment === 'right') return '---:';
+      if (alignment === 'center') return ':---:';
+      return '---';
+    });
+    const row = (values: readonly (string | undefined)[]) => `| ${values.join(' | ')} |`;
+    return `${row(rendered[0])}\n${row(delimiters)}${rendered
+      .slice(1)
+      .map((values) => `\n${row(values)}`)
+      .join('')}\n\n`;
+  };
   const renderNode = (node: HtmlNode): string => {
     if (node.type === 'text') return escapeGfmText(node.value);
     if (
@@ -273,8 +344,32 @@ const renderMarkdown = (
     }
     if (node.tag === 'pre') {
       const code = findElement(node, (child) => child.tag === 'code');
-      const value = (code ? plainText(code) : plainText(node)).replace(/^\n|\n$/g, '');
-      const language = code?.attributes.class?.match(/language-([\w-]+)/)?.[1] ?? node.attributes['data-language'] ?? '';
+      const expressiveLines: ElementNode[] = [];
+      const collectExpressiveLines = (parent: ElementNode) => {
+        for (const child of parent.children) {
+          if (child.type !== 'element') continue;
+          if (hasClass(child, 'ec-line')) expressiveLines.push(child);
+          else collectExpressiveLines(child);
+        }
+      };
+      collectExpressiveLines(node);
+      const value = (
+        expressiveLines.length > 0
+          ? expressiveLines
+              .map((line) => {
+                const source = findElement(line, (child) => hasClass(child, 'code'));
+                return source ? plainText(source) : '';
+              })
+              .join('\n')
+          : code
+            ? plainText(code)
+            : plainText(node)
+      ).replace(/^\n|\n$/g, '');
+      const language =
+        code?.attributes.class?.match(/language-([\w-]+)/)?.[1] ??
+        node.attributes.class?.match(/language-([\w-]+)/)?.[1] ??
+        node.attributes['data-language'] ??
+        (hasClass(node, 'mermaid') ? 'mermaid' : '');
       const fence = codeDelimiter(value, 3);
       return `${fence}${language}\n${value}\n${fence}\n\n`;
     }
@@ -310,7 +405,9 @@ const renderMarkdown = (
     if (node.tag === 'summary') return '';
     if (['kbd', 'mark', 'sub', 'sup', 'abbr'].includes(node.tag))
       return renderRaw(node, pagePathname, generatedDocs, warn);
-    if (['table', 'video', 'audio', 'iframe', 'picture', 'source', 'track'].includes(node.tag))
+    if (node.tag === 'table')
+      return renderTable(node) ?? `${renderRaw(node, pagePathname, generatedDocs, warn)}\n\n`;
+    if (['video', 'audio', 'iframe', 'picture', 'source', 'track'].includes(node.tag))
       return `${renderRaw(node, pagePathname, generatedDocs, warn)}\n\n`;
     if (['figure', 'figcaption'].includes(node.tag)) return `${renderChildren(node)}\n\n`;
     return renderChildren(node);

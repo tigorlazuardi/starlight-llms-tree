@@ -473,7 +473,7 @@ tags: [éclair/child]
   assert.match(markdown, /3\. Third\n7\. Seventh\n8\. Eighth/);
   assert.match(markdown, /3\. Third\n2\. Second\n1\. First/);
   assert.match(markdown, /8\. Eighth\n4\. Fourth\n3\. Third/);
-  assert.match(markdown, /<table><thead><tr><th>Tool<\/th><th>Ready<\/th><\/tr><\/thead><tbody><tr><td><a href="\/docs\/guide\.md#start">Pack<\/a><\/td><td>yes<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /\| Tool \| Ready \|\n\| --- \| --- \|\n\| \[Pack\]\(\/docs\/guide\.md#start\) \| yes \|/);
   assert.match(markdown, /<video controls="" src="\/docs\/demo\.mp4"><source src="\/docs\/demo\.webm" type="video\/webm">Video fallback<\/video>/);
   assert.match(markdown, /<iframe src="https:\/\/example\.com\/embed" title="Demo"><\/iframe>/);
   assert.match(markdown, /> \[!TIP\]\n> \*\*Remember\*\*\n> Keep \*\*semantic content\*\*\./);

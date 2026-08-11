@@ -103,6 +103,28 @@ test('normalization preserves malformed links and assets while reporting recover
   assert.deepEqual(stages, ['link', 'asset']);
 });
 
+test('normalization preserves Expressive Code lines, GFM tables, and Mermaid fences', () => {
+  const markdown = normalize(page(`
+<pre data-language="go"><code>
+<div class="ec-line"><div class="gutter"><div class="ln">1</div></div><div class="code">package consts</div></div>
+<div class="ec-line"><div class="gutter"><div class="ln">2</div></div><div class="code"></div></div>
+<div class="ec-line"><div class="gutter"><div class="ln">3</div></div><div class="code"><span>const Layout = &quot;2006-01-02&quot;</span></div></div>
+</code></pre>
+<table><thead><tr><th>Kapabilitas</th><th>Value</th></tr></thead><tbody><tr><td><strong>Katalog</strong></td><td><code dir="auto">KodePemesanan</code> and <a href="/docs/guide/">guide</a></td></tr></tbody></table>
+<pre class="mermaid">flowchart LR
+  A --&gt; B</pre>
+`));
+
+  assert.match(markdown, /```go\npackage consts\n\nconst Layout = "2006-01-02"\n```/);
+  assert.doesNotMatch(markdown, /1package|2\n|3const/);
+  assert.match(
+    markdown,
+    /\| Kapabilitas \| Value \|\n\| --- \| --- \|\n\| \*\*Katalog\*\* \| `KodePemesanan` and \[guide\]\(\/docs\/guide\.md\) \|/,
+  );
+  assert.doesNotMatch(markdown, /<table|dir="auto"/);
+  assert.match(markdown, /```mermaid\nflowchart LR\n  A --> B\n```/);
+});
+
 test('normalization preserves Markdown semantics and rewrites explicit index routes', () => {
   const markdown = normalize(page(`
 <p>Literal &lt;Widget&gt;, \\ slash, [brackets], *stars*, and _underscores_.<br>Next line.</p>
@@ -121,6 +143,7 @@ test('normalization preserves Markdown semantics and rewrites explicit index rou
 <ol reversed><li>Three</li><li>Two</li><li>One</li></ol>
 <ol reversed start="8"><li>Eight</li><li value="4">Four</li><li>Three</li></ol>
 <table class="results"><thead><tr><th>Name</th><th>Score</th></tr></thead><tbody><tr><td><a href="/docs/guide/#start">Ada</a></td><td>10</td></tr></tbody></table>
+<table class="complex"><thead><tr><th colspan="2">Combined</th></tr></thead><tbody><tr><td>A</td><td>B</td></tr></tbody></table>
 <video controls src="/docs/demo.mp4"><source src="/docs/demo.webm" type="video/webm">Fallback</video>
 <iframe src="https://example.com/embed" title="Demo"></iframe>
 <aside class="starlight-aside starlight-aside--tip"><p class="starlight-aside__title"><svg aria-hidden="true"></svg>Remember</p><div class="starlight-aside__content"><p>Keep body.</p></div></aside>
@@ -145,7 +168,8 @@ test('normalization preserves Markdown semantics and rewrites explicit index rou
   assert.match(markdown, /3\. Three\n7\. Seven\n8\. Eight/);
   assert.match(markdown, /3\. Three\n2\. Two\n1\. One/);
   assert.match(markdown, /8\. Eight\n4\. Four\n3\. Three/);
-  assert.match(markdown, /<table class="results"><thead><tr><th>Name<\/th><th>Score<\/th><\/tr><\/thead><tbody><tr><td><a href="\/docs\/guide\.md#start">Ada<\/a><\/td><td>10<\/td><\/tr><\/tbody><\/table>/);
+  assert.match(markdown, /\| Name \| Score \|\n\| --- \| --- \|\n\| \[Ada\]\(\/docs\/guide\.md#start\) \| 10 \|/);
+  assert.match(markdown, /<table class="complex"><thead><tr><th colspan="2">Combined<\/th><\/tr><\/thead><tbody><tr><td>A<\/td><td>B<\/td><\/tr><\/tbody><\/table>/);
   assert.match(markdown, /<video controls="" src="\/docs\/demo\.mp4"><source src="\/docs\/demo\.webm" type="video\/webm">Fallback<\/video>/);
   assert.match(markdown, /<iframe src="https:\/\/example\.com\/embed" title="Demo"><\/iframe>/);
   assert.match(markdown, /> \[!TIP\]\n> \*\*Remember\*\*\n> Keep body\./);
