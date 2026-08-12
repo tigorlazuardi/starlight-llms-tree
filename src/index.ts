@@ -417,6 +417,7 @@ export const starlightLlmsTree = (options: StarlightLlmsTreeOptions = {}) => {
         addIntegration,
         addRouteMiddleware,
         astroConfig,
+        command,
       }: {
         addIntegration(integration: AstroIntegration): void;
         addRouteMiddleware(config: { entrypoint: string }): void;
@@ -425,7 +426,9 @@ export const starlightLlmsTree = (options: StarlightLlmsTreeOptions = {}) => {
           site?: string;
           build: { format: 'directory' | 'file' | 'preserve' };
         };
+        command: 'build' | 'dev' | 'preview' | 'sync';
       }) => {
+        if (command !== 'build') return;
         const owner = acquireMetadataOwner();
         try {
           addRouteMiddleware({ entrypoint: new URL('./metadata-middleware.js', import.meta.url).href });

@@ -136,7 +136,6 @@ const normalizeBlocks = (value: string) =>
 const escapeGfmText = (value: string) =>
   value
     .replace(/\s+/g, ' ')
-    .replace(/&/g, '&amp;')
     .replace(/[\\`*_[\]<>~|]/g, '\\$&')
     .replace(/(^|\n)([ \t]*)([#>+-])(?=\s|$)/g, '$1$2\\$3')
     .replace(/(^|\n)([ \t]*\d+)([.)])(?=\s)/g, '$1$2\\$3');
@@ -199,7 +198,20 @@ const renderMarkdown = (
   };
   collectIds(content);
 
-  const renderChildren = (node: ElementNode) => node.children.map(render).join('');
+  const renderChildren = (node: ElementNode) =>
+    node.children
+      .map((child, index) => {
+        if (child.type !== 'text' || !/^\s+$/.test(child.value)) return render(child);
+        const siblingIsBlock = (sibling: HtmlNode | undefined) =>
+          sibling?.type === 'element' &&
+          /^(?:address|article|aside|blockquote|details|div|dl|fieldset|figure|footer|form|h[1-6]|header|hr|main|nav|ol|p|pre|section|table|ul)$/.test(
+            sibling.tag,
+          );
+        return siblingIsBlock(node.children[index - 1]) || siblingIsBlock(node.children[index + 1])
+          ? ''
+          : render(child);
+      })
+      .join('');
   const renderList = (node: ElementNode, ordered: boolean) => {
     const items = node.children.filter(
       (child): child is ElementNode => child.type === 'element' && child.tag === 'li',

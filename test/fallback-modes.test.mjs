@@ -16,6 +16,7 @@ const runBuild = async (root, options = {}, includeGuide = false) => {
     },
     addRouteMiddleware() {},
     astroConfig: { base: '/', build: { format: 'directory' } },
+    command: 'build',
   });
   await onRequest(
     {
@@ -66,6 +67,24 @@ const runBuild = async (root, options = {}, includeGuide = false) => {
   });
   return messages;
 };
+
+test('dev config restarts do not acquire build metadata ownership', () => {
+  const plugin = starlightLlmsTree();
+  const setup = () =>
+    plugin.hooks['config:setup']({
+      addIntegration() {
+        assert.fail('dev must not register build integration');
+      },
+      addRouteMiddleware() {
+        assert.fail('dev must not register build middleware');
+      },
+      astroConfig: { base: '/', build: { format: 'directory' } },
+      command: 'dev',
+    });
+
+  assert.doesNotThrow(setup);
+  assert.doesNotThrow(setup);
+});
 
 test('recoverable page failure emits authored raw body and warning', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'starlight-fallback-'));

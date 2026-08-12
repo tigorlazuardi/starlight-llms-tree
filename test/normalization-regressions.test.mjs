@@ -103,6 +103,18 @@ test('normalization preserves malformed links and assets while reporting recover
   assert.deepEqual(stages, ['link', 'asset']);
 });
 
+test('normalization decodes HTML entities without indenting adjacent blocks', () => {
+  const markdown = normalize(page(`<p>Bentuk &amp; klaim.</p>
+ <h2>Alur</h2>
+ <table><thead><tr><th>Topic</th></tr></thead><tbody><tr><td>&lt;topic&gt; &amp; retry</td></tr></tbody></table>
+ <pre class="mermaid">CONS --&gt; RPT["topic &lt;topic&gt;-failed"]</pre>`));
+
+  assert.match(markdown, /Bentuk & klaim\./);
+  assert.match(markdown, /\| \\<topic\\> & retry \|/);
+  assert.match(markdown, /```mermaid\nCONS --> RPT\["topic <topic>-failed"\]\n```/);
+  assert.ok(markdown.split('\n').every((line) => !/^ [^ ]/.test(line)));
+});
+
 test('normalization preserves Expressive Code lines, GFM tables, and Mermaid fences', () => {
   const markdown = normalize(page(`
 <pre data-language="go"><code>

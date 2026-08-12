@@ -40,9 +40,28 @@ Root index links direct pages and child folders. Each child index repeats same r
 - [Reference](/docs/reference/llms.txt)
 ```
 
-## Tags and scopes
+## Tags support
 
-Add tags to normal Starlight page frontmatter. Page entries preserve complete tag strings:
+Tags classify pages by subject independently from URL structure. This lets an LLM client select a precise page using authored metadata instead of guessing from titles and paths.
+
+Allow `tags` in your Starlight content schema:
+
+```ts
+import { defineCollection, z } from 'astro:content';
+import { docsLoader } from '@astrojs/starlight/loaders';
+import { docsSchema } from '@astrojs/starlight/schema';
+
+export const collections = {
+  docs: defineCollection({
+    loader: docsLoader(),
+    schema: docsSchema({
+      extend: z.object({ tags: z.array(z.string()).optional() }),
+    }),
+  }),
+};
+```
+
+Then add complete tags to page frontmatter:
 
 ```md
 ---
@@ -52,19 +71,27 @@ tags: [setup/linux, setup/mac]
 ---
 ```
 
+Generated page entry preserves those tags:
+
 ```md
 - [Install](/docs/guides/install.md): Install on supported platforms.
   - Tags: `setup/linux`, `setup/mac`
 ```
 
-Folder entries summarize descendant tags as sorted, unique scopes. Scope is text before first `/`; tag without `/` is already complete scope. Given descendants tagged `guide`, `setup/linux`, and `setup/mac`, parent index contains:
+## Scope hoisting
+
+Scope hoisting makes topic discovery cheap at every tree level. Client can reject irrelevant folders from parent `llms.txt` instead of fetching every nested index first.
+
+Plugin derives scope from text before first `/`; tag without `/` is already complete scope. It collects scopes from every page below a folder, removes duplicates, sorts them, then adds them to parent folder link.
+
+Given pages below `guides/` tagged `guide`, `setup/linux`, and `setup/mac`, generated parent index contains:
 
 ```md
 - [Guides](/docs/guides/llms.txt)
   - Scopes: `guide`, `setup`
 ```
 
-Clients can inspect scopes to choose folder, then follow its `llms.txt` and inspect full page tags without knowing tree depth.
+Client sees `setup` at parent level, follows `guides/llms.txt`, then uses full `setup/linux` and `setup/mac` tags to select page. This preserves detail at leaves while exposing compact routing hints above them, regardless of tree depth.
 
 Page endpoint starts with JSON frontmatter copied from Starlight metadata, then normalized readable Markdown. Generated links target `.md` endpoints and `llms.txt` indexes. Draft pages, 404 page, redirects, and non-doc routes are excluded.
 

@@ -29,13 +29,14 @@ test('packed package builds repository usage site with documented endpoints', as
   await run(site, ['run', 'build']);
 
   const dist = path.join(site, 'dist');
-  const [rootIndex, usageIndex, homePage, usagePage, configurationPage, outputPage] = await Promise.all([
+  const [rootIndex, usageIndex, homePage, usagePage, configurationPage, outputPage, readme] = await Promise.all([
     readFile(path.join(dist, 'llms.txt'), 'utf8'),
     readFile(path.join(dist, 'usage/llms.txt'), 'utf8'),
     readFile(path.join(dist, 'index.html'), 'utf8'),
     readFile(path.join(dist, 'usage.md'), 'utf8'),
     readFile(path.join(dist, 'usage/configuration.md'), 'utf8'),
     readFile(path.join(dist, 'usage/output.md'), 'utf8'),
+    readFile(path.join(repository, 'README.md'), 'utf8'),
   ]);
 
   assert.match(rootIndex, /\[Usage\]\(https:\/\/tigorlazuardi\.github\.io\/starlight-llms-tree\/usage\/llms\.txt\)/);
@@ -52,6 +53,16 @@ test('packed package builds repository usage site with documented endpoints', as
   assert.match(usagePage, /does not change rendered site pages or add runtime server endpoints/);
   assert.match(usagePage, /starlightLlmsTree\(\)/);
   assert.match(configurationPage, /STARLIGHT_LLMS_TREE_DEBUG=1/);
+  assert.match(homePage, /<h2[^>]*>Features<\/h2>/);
+  assert.match(homePage, /Tags support/);
+  assert.match(homePage, /Scope hoisting/);
+  assert.match(outputPage, /Tags classify pages by subject independently from URL structure/);
+  assert.match(outputPage, /Scope hoisting makes topic discovery cheap at every tree level/);
+  assert.match(outputPage, /Scopes: `guide`, `setup`/);
   assert.match(outputPage, /dist\/reference\/api\.md/);
   assert.doesNotMatch(outputPage, /dist\/reference\/api\/llms\.txt/);
+  assert.match(
+    readme,
+    /Open generated top-level llms\.txt.*https:\/\/tigorlazuardi\.github\.io\/starlight-llms-tree\/llms\.txt/,
+  );
 });

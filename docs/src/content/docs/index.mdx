@@ -21,11 +21,17 @@ hero:
 
 ## Build once. Traverse every folder.
 
-`starlight-llms-tree` adds LLM-friendly artifacts to normal static Starlight builds:
+`starlight-llms-tree` adds LLM-friendly artifacts to normal static Starlight builds.
 
-- recursive `llms.txt` indexes from root to nested folders;
-- one Markdown endpoint per published docs page;
-- final links that respect Astro `site`, `base`, and public routes.
+## Features
+
+- **Recursive `llms.txt` indexes** — browse root and nested folders with one consistent index format.
+- **Markdown page endpoints** — fetch readable content for every published docs page.
+- **Tags support** — preserve complete page tags such as `setup/linux` for precise discovery.
+- **Scope hoisting** — summarize descendant tags such as `setup/linux` and `setup/mac` as `setup` on parent folder links, so clients can choose relevant branches before traversing them.
+- **Route-aware static output** — generated links respect Astro `site`, `base`, and final public routes without a runtime server.
+
+See [output examples](./usage/output/) for tags and scope hoisting input and generated `llms.txt` snippets.
 
 ## Start with existing Starlight config
 
